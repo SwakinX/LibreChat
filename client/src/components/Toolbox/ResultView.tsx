@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { ExecuteResult, ToolManifest } from './types';
+import MarkdownLite from '~/components/Chat/Messages/Content/MarkdownLite';
 import { useLocalize } from '~/hooks';
 
 type ResultViewProps = { outcome: ExecuteResult; manifest: ToolManifest };
@@ -64,7 +65,22 @@ export default function ResultView({ outcome, manifest }: ResultViewProps) {
     );
   }
 
-  if (renderer === 'text' || renderer === 'markdown') {
+  if (renderer === 'markdown') {
+    /* Handlers return objects; the markdown convention is a `content` string
+     * (a bare string result is accepted too). Anything else falls back to the
+     * raw text view rather than rendering JSON as prose. */
+    const content = markdownContent(result);
+    if (content !== null) {
+      return (
+        <div className="markdown-result text-sm text-text-primary">
+          <MarkdownLite content={content} codeExecution={false} />
+        </div>
+      );
+    }
+    return <pre className="whitespace-pre-wrap break-words text-sm">{stringify(result)}</pre>;
+  }
+
+  if (renderer === 'text') {
     const text = typeof result === 'string' ? result : stringify(result);
     return <pre className="whitespace-pre-wrap break-words text-sm text-text-primary">{text}</pre>;
   }
@@ -74,6 +90,20 @@ export default function ResultView({ outcome, manifest }: ResultViewProps) {
       {JSON.stringify(result, null, 2)}
     </pre>
   );
+}
+
+/** Markdown renderer convention: a `content` string on the result object, or a bare string. */
+function markdownContent(result: unknown): string | null {
+  if (typeof result === 'string') {
+    return result;
+  }
+  if (result && typeof result === 'object') {
+    const content = (result as { content?: unknown }).content;
+    if (typeof content === 'string') {
+      return content;
+    }
+  }
+  return null;
 }
 
 function formatCell(value: unknown): string {

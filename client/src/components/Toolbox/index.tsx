@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '@librechat/client';
 import { useSearchParams } from 'react-router-dom';
 import { AlertTriangle, Play, Wrench } from 'lucide-react';
@@ -7,7 +7,6 @@ import { useAuthContext, useDocumentTitle, useLocalize } from '~/hooks';
 import OpenSidebar from '~/components/Chat/Menus/OpenSidebar';
 import { useExecuteTool, useToolsQuery } from './api';
 import NextcloudConnect from './NextcloudConnect';
-import { useActivePanel } from '~/Providers';
 import SchemaForm from './SchemaForm';
 import ResultView from './ResultView';
 import { cn } from '~/utils';
@@ -17,17 +16,11 @@ import { cn } from '~/utils';
 export default function Toolbox() {
   const localize = useLocalize();
   const { user } = useAuthContext();
-  const { setActive } = useActivePanel();
   useDocumentTitle(`${localize('com_toolbox_nav')} · ${user?.username ?? 'TerraVox'}`);
   const [searchParams] = useSearchParams();
   const toolId = searchParams.get('tool');
   const { data: tools = [] } = useToolsQuery();
   const selected = useMemo(() => tools.find((t) => t.tool_id === toolId) ?? null, [tools, toolId]);
-
-  /** Direct visits and reloads restore the tool panel alongside the route. */
-  useEffect(() => {
-    setActive('toolbox');
-  }, [setActive]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-surface-primary text-text-primary">

@@ -6,7 +6,8 @@
  * OpenIDSessionRefresh provider (requires OPENID_REUSE_TOKENS=true).
  */
 const express = require('express');
-const { logger } = require('@librechat/data-schemas');
+const { logger, SystemCapabilities } = require('@librechat/data-schemas');
+const { requireCapability } = require('~/server/middleware/roles/capabilities');
 const { requireJwtAuth } = require('~/server/middleware');
 const openIDSessionRefresh = require('~/server/services/OpenIDSessionRefresh');
 
@@ -101,6 +102,15 @@ const handler =
 router.get(
   '/tools',
   handler((req) => `/api/v1/tools?front=${encodeURIComponent(req.query.front || 'ui')}`),
+);
+/* Admin catalog for the admin panel: full tool list incl. disabled. The gateway
+ * enforces the manager group on its side; this side keeps admins-only so the
+ * route never broadens who can even probe it. */
+router.get(
+  '/tools/all',
+  requireJwtAuth,
+  requireCapability(SystemCapabilities.ACCESS_ADMIN),
+  handler(() => '/api/v1/tools/all'),
 );
 router.post(
   '/tools/:toolId/execute',
