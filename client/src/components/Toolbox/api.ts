@@ -1,37 +1,59 @@
+import { request } from 'librechat-data-provider';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ExecuteResult, LinkPoll, LinkState, NextcloudStatus, ToolManifest } from './types';
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  });
-  const text = await res.text();
-  const body = text ? JSON.parse(text) : {};
-  if (!res.ok) {
-    const detail = body?.detail ?? body;
-    const message =
-      typeof detail === 'string'
-        ? detail
-        : (detail?.message ?? detail?.detail ?? JSON.stringify(detail));
-    const error = new Error(message) as Error & {
-      status?: number;
-      code?: string;
-      payload?: unknown;
-    };
-    error.status = res.status;
-    error.code = typeof detail === 'object' && detail !== null ? detail.code : undefined;
-    error.payload = detail;
-    throw error;
+type ApiError = Error & { status?: number; code?: string; payload?: unknown };
+
+/**
+ * All calls go through the shared data-provider axios instance, which carries the
+ * app JWT (set by AuthContext) and the 401 refresh/retry interceptors — a raw
+ * fetch() here would hit requireJwtAuth without a token and fail with 401.
+ */
+function toError(err: unknown): ApiError {
+  const axiosErr = err as { response?: { status?: number; data?: unknown }; message?: string };
+  const raw = axiosErr.response?.data;
+  const detail = (raw as { detail?: unknown } | undefined)?.detail ?? raw;
+  const message =
+    typeof detail === 'string'
+      ? detail
+      : ((detail as { message?: string } | undefined)?.message ?? axiosErr.message ?? String(err));
+  const error = new Error(message) as ApiError;
+  error.status = axiosErr.response?.status;
+  error.code =
+    typeof detail === 'object' && detail !== null ? (detail as { code?: string }).code : undefined;
+  error.payload = detail;
+  return error;
+}
+
+async function get<T>(url: string): Promise<T> {
+  try {
+    return (await request.get(url)) as T;
+  } catch (err) {
+    throw toError(err);
   }
-  return body as T;
+}
+
+async function post<T>(url: string, data?: unknown): Promise<T> {
+  try {
+    return (await request.post(url, data)) as T;
+  } catch (err) {
+    throw toError(err);
+  }
+}
+
+async function del<T>(url: string): Promise<T> {
+  try {
+    return (await request.delete(url)) as T;
+  } catch (err) {
+    throw toError(err);
+  }
 }
 
 export const useToolsQuery = (front: 'ui' | 'mcp' = 'ui') =>
   useQuery({
     queryKey: ['terravox', 'tools', front],
     queryFn: () =>
-      api<{ tools: ToolManifest[] }>(`/api/terravox/tools?front=${front}`).then(
+      get<{ tools: ToolManifest[] }>(`/api/terravox/tools?front=${front}`).then(
         (d) => d.tools ?? [],
       ),
   });
@@ -39,12 +61,12 @@ export const useToolsQuery = (front: 'ui' | 'mcp' = 'ui') =>
 export const useNextcloudStatus = () =>
   useQuery({
     queryKey: ['terravox', 'nextcloud', 'status'],
-    queryFn: () => api<NextcloudStatus>('/api/terravox/nextcloud/status'),
+    queryFn: () => get<NextcloudStatus>('/api/terravox/nextcloud/status'),
   });
 
 export const useStartLink = () =>
   useMutation({
-    mutationFn: () => api<LinkState>('/api/terravox/nextcloud/link', { method: 'POST' }),
+    mutationFn: () => post<LinkState>('/api/terravox/nextcloud/link'),
   });
 
 export const usePollLink = (linkId: string | null) =>
@@ -52,14 +74,13 @@ export const usePollLink = (linkId: string | null) =>
     queryKey: ['terravox', 'nextcloud', 'link', linkId],
     enabled: !!linkId,
     refetchInterval: (data) => (data?.status === 'pending' ? 3000 : false),
-    queryFn: () => api<LinkPoll>(`/api/terravox/nextcloud/link/${linkId}`),
+    queryFn: () => get<LinkPoll>(`/api/terravox/nextcloud/link/${linkId}`),
   });
 
 export const useUnlink = () => {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: () =>
-      api<{ unlinked: boolean }>('/api/terravox/nextcloud/link', { method: 'DELETE' }),
+    mutationFn: () => del<{ unlinked: boolean }>('/api/terravox/nextcloud/link'),
     onSuccess: () => client.invalidateQueries({ queryKey: ['terravox', 'nextcloud'] }),
   });
 };
@@ -67,8 +88,5 @@ export const useUnlink = () => {
 export const useExecuteTool = (toolId: string) =>
   useMutation({
     mutationFn: (args: { params: Record<string, unknown>; confirmed?: boolean }) =>
-      api<ExecuteResult>(`/api/terravox/tools/${encodeURIComponent(toolId)}/execute`, {
-        method: 'POST',
-        body: JSON.stringify(args),
-      }),
+      post<ExecuteResult>(`/api/terravox/tools/${encodeURIComponent(toolId)}/execute`, args),
   });

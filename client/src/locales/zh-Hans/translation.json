@@ -1463,5 +1463,14 @@
   "com_toolbox_nextcloud_expired": "授权已过期，请重试",
   "com_toolbox_unlink": "解绑",
   "com_toolbox_no_params": "该工具无需参数",
-  "com_toolbox_empty_table": "（空）"
+  "com_toolbox_empty_table": "（空）",
+  "com_toolbox_search": "搜索工具",
+  "com_toolbox_select_hint": "在左侧选择工具，查看详情并运行",
+  "com_toolbox_load_error": "工具列表加载失败",
+  "com_toolbox_retry_later": "出现问题，请稍后重试。",
+  "com_toolbox_relogin": "当前会话缺少访问令牌，请退出登录并重新登录后再打开本页。",
+  "com_toolbox_group_nextcloud": "云盘",
+  "com_toolbox_group_spatial": "空间查询",
+  "com_toolbox_group_echo": "通用",
+  "com_toolbox_group_demo": "演示"
 }

@@ -2981,5 +2981,14 @@
   "com_toolbox_nextcloud_expired": "Authorization expired, please retry",
   "com_toolbox_unlink": "Unlink",
   "com_toolbox_no_params": "This tool takes no parameters.",
-  "com_toolbox_empty_table": "(empty)"
+  "com_toolbox_empty_table": "(empty)",
+  "com_toolbox_search": "Search tools",
+  "com_toolbox_select_hint": "Select a tool on the left to see its details and run it",
+  "com_toolbox_load_error": "Failed to load tools",
+  "com_toolbox_retry_later": "Something went wrong. Please try again later.",
+  "com_toolbox_relogin": "Your session is missing an access token. Please sign out and sign in again, then reopen this page.",
+  "com_toolbox_group_nextcloud": "Cloud Drive",
+  "com_toolbox_group_spatial": "Spatial",
+  "com_toolbox_group_echo": "General",
+  "com_toolbox_group_demo": "Demo"
 }
