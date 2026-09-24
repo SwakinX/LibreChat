@@ -8,6 +8,7 @@ import type { TEndpointsConfig } from 'librechat-data-provider';
 import type { NavLink } from '~/common';
 import { useGetEndpointsQuery, useGetStartupConfig, useInsightsAccessQuery } from '~/data-provider';
 import ConversationsSection from '~/components/UnifiedSidebar/ConversationsSection';
+import ToolboxSection from '~/components/Toolbox/ToolboxSection';
 import useSideNavLinks from '~/hooks/Nav/useSideNavLinks';
 import { useAuthContext } from '~/hooks';
 import store from '~/store';
@@ -73,17 +74,15 @@ export default function useUnifiedSidebarLinks() {
     };
 
     /* TerraVox Toolbox: standalone tool-runner page, visible to all signed-in users
-     * (the gateway filters the tool list per user group). */
+     * (the gateway filters the tool list per user group). Carries a Component so
+     * the icon strips to a tool-list panel the way the chat icon owns the
+     * conversations panel; the section navigates to /toolbox on mount. */
     const toolboxLink: NavLink = {
       title: 'com_toolbox_nav',
       label: '',
       icon: Wrench,
       id: 'toolbox',
-      onClick: () => {
-        if (!location.pathname.startsWith('/toolbox')) {
-          navigate('/toolbox');
-        }
-      },
+      Component: ToolboxSection,
     };
 
     if (

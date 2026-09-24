@@ -6,6 +6,7 @@
  * OpenIDSessionRefresh provider (requires OPENID_REUSE_TOKENS=true).
  */
 const express = require('express');
+const { logger } = require('@librechat/data-schemas');
 const { requireJwtAuth } = require('~/server/middleware');
 const openIDSessionRefresh = require('~/server/services/OpenIDSessionRefresh');
 
@@ -18,6 +19,11 @@ const TIMEOUT_MS = Number(process.env.TOOL_GATEWAY_TIMEOUT_MS || 120000);
 /**
  * Resolve a fresh access token for the authenticated user; null when the
  * OPENID_REUSE_TOKENS session capability is absent (flag off or stale login).
+ *
+ * The provider REJECTS (rather than resolving null) when a session exists but
+ * its OpenID capability was cleared — e.g. the login predates the
+ * OPENID_REUSE_TOKENS flag. That rejection is expected here, so it is caught
+ * and folded into the null → 503 re-login path instead of bubbling up as 500.
  */
 async function resolveAccessToken(req, res, { forceRefresh = false } = {}) {
   const provider = openIDSessionRefresh.createOpenIDSessionTokenProvider({
@@ -26,7 +32,13 @@ async function resolveAccessToken(req, res, { forceRefresh = false } = {}) {
     user: req.user,
     tokenPreference: 'access_token',
   });
-  const tokens = await provider({ forceRefresh });
+  let tokens = null;
+  try {
+    tokens = await provider({ forceRefresh });
+  } catch (error) {
+    logger.warn('[terravox] OpenID session token unavailable:', error?.message);
+    return null;
+  }
   return (
     tokens?.access_token || (forceRefresh ? null : req.user?.federatedTokens?.access_token) || null
   );
