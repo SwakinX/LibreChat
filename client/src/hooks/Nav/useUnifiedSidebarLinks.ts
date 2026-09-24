@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useRecoilValue } from 'recoil';
-import { BarChart3, MessagesSquare } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { BarChart3, MessagesSquare, Wrench } from 'lucide-react';
 import { useUserKeyQuery } from 'librechat-data-provider/react-query';
 import { getConfigDefaults, getEndpointField } from 'librechat-data-provider';
 import type { TEndpointsConfig } from 'librechat-data-provider';
@@ -72,11 +72,25 @@ export default function useUnifiedSidebarLinks() {
       Component: ConversationsSection,
     };
 
+    /* TerraVox Toolbox: standalone tool-runner page, visible to all signed-in users
+     * (the gateway filters the tool list per user group). */
+    const toolboxLink: NavLink = {
+      title: 'com_toolbox_nav',
+      label: '',
+      icon: Wrench,
+      id: 'toolbox',
+      onClick: () => {
+        if (!location.pathname.startsWith('/toolbox')) {
+          navigate('/toolbox');
+        }
+      },
+    };
+
     if (
       !insightsFeatureEnabled ||
       (!isInsightsRoute && !isInsightsAccessLoading && insightsAccess?.access !== true)
     ) {
-      return [conversationLink, ...sideNavLinks];
+      return [conversationLink, ...sideNavLinks, toolboxLink];
     }
 
     const insightsLink: NavLink = {
@@ -94,6 +108,7 @@ export default function useUnifiedSidebarLinks() {
     const mcpIndex = sideNavLinks.findIndex((link) => link.id === 'mcp-builder');
     const nextLinks = [...sideNavLinks];
     nextLinks.splice(mcpIndex >= 0 ? mcpIndex + 1 : nextLinks.length, 0, insightsLink);
+    nextLinks.push(toolboxLink);
 
     return [conversationLink, ...nextLinks];
   }, [
