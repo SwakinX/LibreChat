@@ -43,9 +43,11 @@ const user = require('./user');
 const mcp = require('./mcp');
 const rum = require('./rum');
 const insights = require('./insights');
+const terravox = require('./terravox');
 
 module.exports = {
   insights,
+  terravox,
   rum,
   mcp,
   auth,
