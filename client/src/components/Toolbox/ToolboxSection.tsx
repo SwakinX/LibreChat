@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ChevronDown } from 'lucide-react';
 import { useMediaQuery, buttonVariants, Spinner } from '@librechat/client';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
@@ -41,12 +41,16 @@ export default function ToolboxSection() {
 
   const activeTool = searchParams.get('tool');
 
-  /** Entering the panel from the icon strip navigates to the tool surface. */
+  /** Entering the panel from the icon strip navigates to the tool surface.
+   * Mount-only (initial path captured once): re-running on every pathname
+   * change would hijack navigation away from /toolbox mid-unmount and bounce
+   * the user back. */
+  const initialPath = useRef(location.pathname);
   useEffect(() => {
-    if (!location.pathname.startsWith('/toolbox')) {
+    if (!initialPath.current.startsWith('/toolbox')) {
       navigate('/toolbox', { replace: true });
     }
-  }, [location.pathname, navigate]);
+  }, [navigate]);
 
   /** Selecting a tool is the common close path on mobile — mirror ConversationsSection. */
   const toggleNav = useCallback(

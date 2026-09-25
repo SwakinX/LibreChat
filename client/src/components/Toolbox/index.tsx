@@ -16,7 +16,6 @@ import { cn } from '~/utils';
 export default function Toolbox() {
   const localize = useLocalize();
   const { user } = useAuthContext();
-  useDocumentTitle(`${localize('com_toolbox_nav')} · ${user?.username ?? 'TerraVox'}`);
   const [searchParams] = useSearchParams();
   const toolId = searchParams.get('tool');
   const { data: catalog } = useToolsQuery();
@@ -24,21 +23,38 @@ export default function Toolbox() {
     () => (catalog?.tools ?? []).find((t) => t.tool_id === toolId) ?? null,
     [catalog, toolId],
   );
+  useDocumentTitle(
+    selected
+      ? `${selected.display_name} · ${localize('com_toolbox_nav')}`
+      : `${localize('com_toolbox_nav')} · ${user?.username ?? 'TerraVox'}`,
+  );
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-surface-primary text-text-primary">
       <header className="flex items-center gap-3 border-b border-border-light px-4 py-3">
         <OpenSidebar />
-        <Wrench className="size-5 text-text-tertiary" aria-hidden="true" />
-        <div className="flex min-w-0 flex-col">
-          <h1 className="truncate text-base font-semibold">{localize('com_toolbox_title')}</h1>
+        <Wrench className="size-5 shrink-0 text-text-tertiary" aria-hidden="true" />
+        {/* 工具标题与信息直接放在页面标题栏：选中工具后取代静态"工具箱"标题 */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="truncate text-base font-semibold">
+              {selected ? selected.display_name : localize('com_toolbox_title')}
+            </h1>
+            {selected?.dangerous && (
+              <span className="flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="size-3" aria-hidden="true" />
+                {localize('com_toolbox_dangerous')}
+              </span>
+            )}
+          </div>
           <span className="truncate text-xs text-text-tertiary">
-            {localize('com_toolbox_subtitle')}
+            {selected ? selected.description : localize('com_toolbox_subtitle')}
           </span>
         </div>
-        <div className="ml-auto">
-          <NextcloudConnect />
-        </div>
+        {selected && (
+          <code className="text-text-quaternary shrink-0 text-xs">{selected.tool_id}</code>
+        )}
+        <NextcloudConnect />
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
@@ -89,17 +105,7 @@ function ToolRunner({ manifest }: { manifest: ToolManifest }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold">{manifest.display_name}</h2>
-        {manifest.dangerous && (
-          <span className="flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
-            <AlertTriangle className="size-3" aria-hidden="true" />
-            {localize('com_toolbox_dangerous')}
-          </span>
-        )}
-        <code className="text-text-quaternary ml-auto text-xs">{manifest.tool_id}</code>
-      </div>
-      <p className="text-sm text-text-tertiary">{manifest.description}</p>
+      {/* 标题/危险标记/描述已上移到页面顶部标题栏，正文直接从参数区开始 */}
 
       <section className="flex flex-col gap-3">
         <h3 className="text-text-quaternary text-xs font-semibold uppercase tracking-wide">
