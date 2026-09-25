@@ -19,8 +19,11 @@ export default function Toolbox() {
   useDocumentTitle(`${localize('com_toolbox_nav')} · ${user?.username ?? 'TerraVox'}`);
   const [searchParams] = useSearchParams();
   const toolId = searchParams.get('tool');
-  const { data: tools = [] } = useToolsQuery();
-  const selected = useMemo(() => tools.find((t) => t.tool_id === toolId) ?? null, [tools, toolId]);
+  const { data: catalog } = useToolsQuery();
+  const selected = useMemo(
+    () => (catalog?.tools ?? []).find((t) => t.tool_id === toolId) ?? null,
+    [catalog, toolId],
+  );
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-surface-primary text-text-primary">

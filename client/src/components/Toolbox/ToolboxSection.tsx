@@ -32,7 +32,7 @@ export default function ToolboxSection() {
   const [searchParams] = useSearchParams();
   const isSmallScreen = useMediaQuery('(max-width: 768px)');
   const { setSidebarOpen } = useSidebarToggle();
-  const { data: tools = [], isLoading, error } = useToolsQuery();
+  const { data: catalog, isLoading, error } = useToolsQuery();
   const [search, setSearch] = useState('');
   const [groupsExpanded, setGroupsExpanded] = useLocalStorage<Record<string, boolean>>(
     'toolbox:groups-expanded',
@@ -61,12 +61,14 @@ export default function ToolboxSection() {
   );
 
   const groups = useMemo(() => {
+    const tools = catalog?.tools ?? [];
     const q = search.trim().toLowerCase();
     const matched = q
       ? tools.filter((t) =>
           [t.tool_id, t.display_name, t.description].some((s) => s?.toLowerCase().includes(q)),
         )
       : tools;
+    const meta = new Map((catalog?.groups ?? []).map((g) => [g.name, g]));
     const byGroup = new Map<string, ToolManifest[]>();
     for (const tool of matched) {
       const ns = groupOf(tool);
@@ -74,8 +76,22 @@ export default function ToolboxSection() {
       list.push(tool);
       byGroup.set(ns, list);
     }
-    return [...byGroup.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [tools, search]);
+    const orderOf = (ns: string) => meta.get(ns)?.sort_order ?? 1000;
+    return [...byGroup.entries()].sort(([a], [b]) => orderOf(a) - orderOf(b) || a.localeCompare(b));
+  }, [catalog, search]);
+
+  /** Group label: gateway display_name (admin-managed) > built-in i18n > raw namespace. */
+  const groupLabel = useCallback(
+    (ns: string) => {
+      const display = catalog?.groups?.find((g) => g.name === ns)?.display_name;
+      if (display) {
+        return display;
+      }
+      const labelKey = GROUP_LABEL_KEYS[ns];
+      return labelKey ? localize(labelKey) : ns;
+    },
+    [catalog, localize],
+  );
 
   const selectTool = (toolId: string) => {
     toggleNav(() => navigate(`/toolbox?tool=${encodeURIComponent(toolId)}`));
@@ -124,7 +140,6 @@ export default function ToolboxSection() {
           )}
           {groups.map(([ns, items]) => {
             const expanded = groupsExpanded[ns] !== false;
-            const labelKey = GROUP_LABEL_KEYS[ns];
             const toggle = () => setGroupsExpanded({ ...groupsExpanded, [ns]: !expanded });
             return (
               <div key={ns} className="flex flex-col px-3 text-sm" role="group">
@@ -138,9 +153,7 @@ export default function ToolboxSection() {
                     type="button"
                     aria-expanded={expanded}
                   >
-                    <span className="select-none truncate">
-                      {labelKey ? localize(labelKey) : ns}
-                    </span>
+                    <span className="select-none truncate">{groupLabel(ns)}</span>
                     <ChevronDown
                       className={cn(
                         'h-3 w-3 shrink-0 transition-transform duration-200',

@@ -69,13 +69,22 @@ async function forwardToGateway(
         'Tool Gateway requires an OpenID session token. Log out and back in (OPENID_REUSE_TOKENS must be enabled).',
     });
   }
+  if (service && !SERVICE_TOKEN) {
+    return res.status(503).json({ message: 'TERRAVOX_SERVICE_TOKEN is not configured' });
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const headers = {
       ...(service
-        ? { 'X-Service-Token': SERVICE_TOKEN }
+        ? {
+            'X-Service-Token': SERVICE_TOKEN,
+            /* Acting admin identity: the gateway records it in its audit trail.
+             * requireJwtAuth already authenticated this request. */
+            'X-Acting-Sub': String(req.user?.id ?? ''),
+            'X-Acting-Username': String(req.user?.username ?? ''),
+          }
         : { Authorization: `Bearer ${accessToken}` }),
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     };
@@ -161,6 +170,87 @@ router.get(
 router.delete(
   '/nextcloud/link',
   handler(() => '/api/v1/nextcloud/link', { method: 'DELETE' }),
+);
+
+/* Admin surface for the admin panel: tool/group CRUD, batch import, handler
+ * list. All calls arrive server-side from the admin panel (Bearer JWT, no
+ * browser session cookie), so they always forward with the service token plus
+ * the acting admin's identity headers — the user-side admin check
+ * (ACCESS_ADMIN) happens here, the gateway audits the acting user. */
+router.use('/admin', requireCapability(SystemCapabilities.ACCESS_ADMIN));
+
+const adminHandler =
+  (path, options = {}) =>
+  async (req, res) => {
+    try {
+      await forwardToGateway(req, res, path(req), {
+        ...options,
+        service: true,
+        body: options.body?.(req),
+      });
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  };
+
+router.get(
+  '/admin/groups',
+  adminHandler(() => '/api/v1/admin/groups'),
+);
+router.post(
+  '/admin/groups',
+  jsonBody,
+  adminHandler(() => '/api/v1/admin/groups', { method: 'POST', body: (req) => req.body }),
+);
+router.patch(
+  '/admin/groups/:name',
+  jsonBody,
+  adminHandler((req) => `/api/v1/admin/groups/${encodeURIComponent(req.params.name)}`, {
+    method: 'PATCH',
+    body: (req) => req.body,
+  }),
+);
+router.delete(
+  '/admin/groups/:name',
+  adminHandler((req) => `/api/v1/admin/groups/${encodeURIComponent(req.params.name)}`, {
+    method: 'DELETE',
+  }),
+);
+router.get(
+  '/admin/handlers',
+  adminHandler(() => '/api/v1/admin/handlers'),
+);
+router.post(
+  '/admin/tools',
+  jsonBody,
+  adminHandler(() => '/api/v1/admin/tools', { method: 'POST', body: (req) => req.body }),
+);
+router.post(
+  '/admin/tools/import',
+  jsonBody,
+  adminHandler(() => '/api/v1/admin/tools/import', { method: 'POST', body: (req) => req.body }),
+);
+router.put(
+  '/admin/tools/:toolId',
+  jsonBody,
+  adminHandler((req) => `/api/v1/admin/tools/${encodeURIComponent(req.params.toolId)}`, {
+    method: 'PUT',
+    body: (req) => req.body,
+  }),
+);
+router.patch(
+  '/admin/tools/:toolId',
+  jsonBody,
+  adminHandler((req) => `/api/v1/admin/tools/${encodeURIComponent(req.params.toolId)}`, {
+    method: 'PATCH',
+    body: (req) => req.body,
+  }),
+);
+router.delete(
+  '/admin/tools/:toolId',
+  adminHandler((req) => `/api/v1/admin/tools/${encodeURIComponent(req.params.toolId)}`, {
+    method: 'DELETE',
+  }),
 );
 
 module.exports = router;

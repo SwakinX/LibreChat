@@ -49,13 +49,22 @@ async function del<T>(url: string): Promise<T> {
   }
 }
 
+export type CatalogGroup = {
+  name: string;
+  display_name: string;
+  sort_order: number;
+};
+
+export type ToolCatalog = {
+  tools: ToolManifest[];
+  /** Group metadata from the gateway (additive; absent on older gateways). */
+  groups?: CatalogGroup[];
+};
+
 export const useToolsQuery = (front: 'ui' | 'mcp' = 'ui') =>
   useQuery({
     queryKey: ['terravox', 'tools', front],
-    queryFn: () =>
-      get<{ tools: ToolManifest[] }>(`/api/terravox/tools?front=${front}`).then(
-        (d) => d.tools ?? [],
-      ),
+    queryFn: () => get<ToolCatalog>(`/api/terravox/tools?front=${front}`),
   });
 
 export const useNextcloudStatus = () =>
