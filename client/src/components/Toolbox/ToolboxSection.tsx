@@ -152,7 +152,8 @@ export default function ToolboxSection() {
                     onClick={toggle}
                     className={cn(
                       buttonVariants({ variant: 'section-header' }),
-                      'group min-w-0 flex-1',
+                      /* 分组标题与工具名同号（text-sm），靠次级色与工具名拉开层次 */
+                      'group min-w-0 flex-1 text-sm font-semibold text-text-secondary',
                     )}
                     type="button"
                     aria-expanded={expanded}
@@ -160,7 +161,7 @@ export default function ToolboxSection() {
                     <span className="select-none truncate">{groupLabel(ns)}</span>
                     <ChevronDown
                       className={cn(
-                        'h-3 w-3 shrink-0 transition-transform duration-200',
+                        'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
                         expanded ? '' : '-rotate-90',
                       )}
                       aria-hidden="true"
