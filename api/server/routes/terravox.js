@@ -252,5 +252,22 @@ router.delete(
     method: 'DELETE',
   }),
 );
+router.get(
+  '/admin/gitea/repos',
+  adminHandler((req) => {
+    const baseUrl = req.query.base_url
+      ? `?base_url=${encodeURIComponent(String(req.query.base_url))}`
+      : '';
+    return `/api/v1/admin/gitea/repos${baseUrl}`;
+  }),
+);
+router.post(
+  '/admin/gitea/repos/check',
+  jsonBody,
+  adminHandler(() => '/api/v1/admin/gitea/repos/check', {
+    method: 'POST',
+    body: (req) => req.body,
+  }),
+);
 
 module.exports = router;
