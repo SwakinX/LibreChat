@@ -16,6 +16,11 @@ router.use(requireJwtAuth);
 
 const GATEWAY_URL = (process.env.TOOL_GATEWAY_URL || 'http://127.0.0.1:8810').replace(/\/$/, '');
 const TIMEOUT_MS = Number(process.env.TOOL_GATEWAY_TIMEOUT_MS || 120000);
+/* Shared secret for read-only catalog routes. The admin panel calls
+ * /api/terravox/tools/all server-side (Bearer JWT only, no browser session
+ * cookie), so no OpenID session token can ever exist on that path; the
+ * gateway accepts this token on catalog endpoints instead. */
+const SERVICE_TOKEN = process.env.TERRAVOX_SERVICE_TOKEN || '';
 
 /**
  * Resolve a fresh access token for the authenticated user; null when the
@@ -45,9 +50,20 @@ async function resolveAccessToken(req, res, { forceRefresh = false } = {}) {
   );
 }
 
-async function forwardToGateway(req, res, path, { method = 'GET', body, retried = false } = {}) {
-  const accessToken = await resolveAccessToken(req, res);
-  if (!accessToken) {
+async function forwardToGateway(
+  req,
+  res,
+  path,
+  { method = 'GET', body, retried = false, service = false, allowServiceToken = false } = {},
+) {
+  const accessToken = service ? null : await resolveAccessToken(req, res);
+  if (!service && !accessToken) {
+    /* No OpenID session token: expected for admin-panel server-side calls.
+     * Catalog-only routes may fall back to the shared service token; anything
+     * user-identified keeps the 503 re-login answer. */
+    if (allowServiceToken && SERVICE_TOKEN) {
+      return forwardToGateway(req, res, path, { method, body, service: true });
+    }
     return res.status(503).json({
       message:
         'Tool Gateway requires an OpenID session token. Log out and back in (OPENID_REUSE_TOKENS must be enabled).',
@@ -57,18 +73,21 @@ async function forwardToGateway(req, res, path, { method = 'GET', body, retried 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
+    const headers = {
+      ...(service
+        ? { 'X-Service-Token': SERVICE_TOKEN }
+        : { Authorization: `Bearer ${accessToken}` }),
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    };
     const response = await fetch(`${GATEWAY_URL}${path}`, {
       method,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      },
+      headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
     // A 401 from the gateway means the forwarded token was stale/rotated:
-    // force one refresh and retry before surfacing the failure.
-    if (response.status === 401 && !retried) {
+    // force one refresh and retry before surfacing the failure (bearer mode only).
+    if (response.status === 401 && !retried && !service) {
       const fresh = await resolveAccessToken(req, res, { forceRefresh: true });
       if (fresh && fresh !== accessToken) {
         return forwardToGateway(req, res, path, { method, body, retried: true });
@@ -92,8 +111,13 @@ const jsonBody = express.json({ limit: '1mb' });
 const handler =
   (path, options = {}) =>
   async (req, res) => {
+    const { allowServiceToken, ...forwardOptions } = options;
     try {
-      await forwardToGateway(req, res, path(req), { ...options, body: options.body?.(req) });
+      await forwardToGateway(req, res, path(req), {
+        ...forwardOptions,
+        body: forwardOptions.body?.(req),
+        allowServiceToken,
+      });
     } catch (error) {
       res.status(500).json({ message: error.message });
     }
@@ -104,13 +128,15 @@ router.get(
   handler((req) => `/api/v1/tools?front=${encodeURIComponent(req.query.front || 'ui')}`),
 );
 /* Admin catalog for the admin panel: full tool list incl. disabled. The gateway
- * enforces the manager group on its side; this side keeps admins-only so the
- * route never broadens who can even probe it. */
+ * enforces the manager group (or the shared service token) on its side; this
+ * side keeps admins-only so the route never broadens who can even probe it.
+ * allowServiceToken: the admin panel's server-side apiFetch carries no browser
+ * session, so this read-only catalog route falls back to the service token. */
 router.get(
   '/tools/all',
   requireJwtAuth,
   requireCapability(SystemCapabilities.ACCESS_ADMIN),
-  handler(() => '/api/v1/tools/all'),
+  handler(() => '/api/v1/tools/all', { allowServiceToken: true }),
 );
 router.post(
   '/tools/:toolId/execute',
