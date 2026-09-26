@@ -20,6 +20,13 @@ export type FieldHint = {
   choices_from?: { tool: string; value_field?: string; label_field?: string };
 };
 
+export type PackageMeta = {
+  /** Latest stable release version (v-prefix normalized); computed by the gateway. */
+  version: string;
+  size: number;
+  updated_at: string;
+};
+
 export type ToolManifest = {
   schema_version: 1;
   tool_id: string;
@@ -39,7 +46,22 @@ export type ToolManifest = {
     order?: string[];
     fields?: Record<string, FieldHint>;
   };
-  execution?: { kind: string; handler?: string; catalog_tool_id?: string };
+  execution?: {
+    kind: string;
+    handler?: string;
+    catalog_tool_id?: string;
+    /** desktop arm: where the Toolhost pulls the package from. */
+    distribution?: {
+      source?: { type: 'gitea_release'; owner: string; repo: string };
+      /** Supplemental fields (tool.json fallback), trusted because admin-registered. */
+      version?: string;
+      package_sha256?: string;
+      launcher?: string;
+      runtime?: 'self-contained' | 'standard-python' | 'arcpy3';
+    };
+  };
+  /** Catalog-only computed block (desktop tools, /api/v1/tools). */
+  package?: PackageMeta;
   result?: {
     renderer?: 'table' | 'map' | 'file' | 'link' | 'text' | 'markdown' | 'json';
     config?: { columns?: string[]; title?: string };

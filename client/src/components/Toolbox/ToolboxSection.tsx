@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAtom } from 'jotai';
 import { AlertTriangle, ChevronDown } from 'lucide-react';
 import { useMediaQuery, buttonVariants, Spinner } from '@librechat/client';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { TranslationKeys } from '~/hooks/useLocalize';
-import type { ToolManifest } from './types';
+import type { MergedTool } from './toolStatus';
 import useSidebarToggle from '~/hooks/Nav/useSidebarToggle';
-import { useLocalize, useLocalStorage } from '~/hooks';
+import { useMergedTools } from './toolhostHooks';
+import { groupsExpandedAtom } from './atoms';
+import { isDesktopTool } from './toolStatus';
 import { Collapse } from '~/components/ui';
-import { useToolsQuery } from './api';
+import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 
 /** Namespace → i18n key for the sidebar groups; unknown namespaces show the raw name. */
@@ -18,12 +21,15 @@ const GROUP_LABEL_KEYS: Record<string, TranslationKeys> = {
   demo: 'com_toolbox_group_demo',
 };
 
-const groupOf = (tool: ToolManifest): string => tool.tool_id.split('.')[0] ?? tool.tool_id;
+const groupOf = (tool: MergedTool): string =>
+  tool.manifest.tool_id.split('.')[0] ?? tool.manifest.tool_id;
 
 /**
  * Sidebar panel for /toolbox — the tool list the conversations list is on the
  * chat route: grouped, collapsible sections with a search field; picking a tool
  * navigates to `/toolbox?tool=<id>` and the main surface renders its runner.
+ * Desktop tools carry a local-state badge (not installed / installed vX /
+ * update available) merged from the Toolhost.
  */
 export default function ToolboxSection() {
   const localize = useLocalize();
@@ -32,12 +38,11 @@ export default function ToolboxSection() {
   const [searchParams] = useSearchParams();
   const isSmallScreen = useMediaQuery('(max-width: 768px)');
   const { setSidebarOpen } = useSidebarToggle();
-  const { data: catalog, isLoading, error } = useToolsQuery();
+  const { tools, groups: groupMeta, isLoading, error } = useMergedTools();
   const [search, setSearch] = useState('');
-  const [groupsExpanded, setGroupsExpanded] = useLocalStorage<Record<string, boolean>>(
-    'toolbox:groups-expanded',
-    {},
-  );
+  /* Same key + JSON shape as the previous useLocalStorage hook — saved
+   * collapse state carries over; Jotai lets the header/panel share it. */
+  const [groupsExpanded, setGroupsExpanded] = useAtom(groupsExpandedAtom);
 
   const activeTool = searchParams.get('tool');
 
@@ -65,15 +70,16 @@ export default function ToolboxSection() {
   );
 
   const groups = useMemo(() => {
-    const tools = catalog?.tools ?? [];
     const q = search.trim().toLowerCase();
     const matched = q
-      ? tools.filter((t) =>
-          [t.tool_id, t.display_name, t.description].some((s) => s?.toLowerCase().includes(q)),
+      ? tools.filter((tool) =>
+          [tool.manifest.tool_id, tool.manifest.display_name, tool.manifest.description].some((s) =>
+            s?.toLowerCase().includes(q),
+          ),
         )
       : tools;
-    const meta = new Map((catalog?.groups ?? []).map((g) => [g.name, g]));
-    const byGroup = new Map<string, ToolManifest[]>();
+    const meta = new Map((groupMeta ?? []).map((group) => [group.name, group]));
+    const byGroup = new Map<string, MergedTool[]>();
     for (const tool of matched) {
       const ns = groupOf(tool);
       const list = byGroup.get(ns) ?? [];
@@ -82,19 +88,19 @@ export default function ToolboxSection() {
     }
     const orderOf = (ns: string) => meta.get(ns)?.sort_order ?? 1000;
     return [...byGroup.entries()].sort(([a], [b]) => orderOf(a) - orderOf(b) || a.localeCompare(b));
-  }, [catalog, search]);
+  }, [tools, groupMeta, search]);
 
   /** Group label: gateway display_name (admin-managed) > built-in i18n > raw namespace. */
   const groupLabel = useCallback(
     (ns: string) => {
-      const display = catalog?.groups?.find((g) => g.name === ns)?.display_name;
+      const display = groupMeta?.find((group) => group.name === ns)?.display_name;
       if (display) {
         return display;
       }
       const labelKey = GROUP_LABEL_KEYS[ns];
       return labelKey ? localize(labelKey) : ns;
     },
-    [catalog, localize],
+    [groupMeta, localize],
   );
 
   const selectTool = (toolId: string) => {
@@ -171,11 +177,11 @@ export default function ToolboxSection() {
                 <Collapse open={expanded}>
                   <div className="pt-0.5">
                     {items.map((tool) => {
-                      const isActive = tool.tool_id === activeTool;
+                      const isActive = tool.manifest.tool_id === activeTool;
                       return (
                         <button
-                          key={tool.tool_id}
-                          onClick={() => selectTool(tool.tool_id)}
+                          key={tool.manifest.tool_id}
+                          onClick={() => selectTool(tool.manifest.tool_id)}
                           aria-current={isActive}
                           className={cn(
                             'relative flex h-9 w-full items-center rounded-lg px-2 py-1.5 text-start transition-colors',
@@ -184,13 +190,16 @@ export default function ToolboxSection() {
                               : 'hover:bg-surface-active-alt',
                           )}
                         >
-                          <span className="min-w-0 flex-1 truncate">{tool.display_name}</span>
-                          {tool.dangerous && (
+                          <span className="min-w-0 flex-1 truncate">
+                            {tool.manifest.display_name}
+                          </span>
+                          {tool.manifest.dangerous && (
                             <AlertTriangle
                               className="ml-2 h-3.5 w-3.5 shrink-0 text-amber-500"
                               aria-hidden="true"
                             />
                           )}
+                          {isDesktopTool(tool.manifest) && <LocalBadge tool={tool} />}
                         </button>
                       );
                     })}
@@ -202,5 +211,42 @@ export default function ToolboxSection() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Desktop-tool local-state chip: gray not-installed / emerald vX / amber vX→vY. */
+function LocalBadge({ tool }: { tool: MergedTool }) {
+  const localize = useLocalize();
+  if (tool.status === 'not_installed') {
+    return (
+      <span
+        className="ml-2 shrink-0 rounded-full border border-border-medium px-1.5 py-0.5 text-[10px] text-text-tertiary"
+        title={localize('com_toolbox_badge_not_installed')}
+      >
+        {localize('com_toolbox_badge_not_installed')}
+      </span>
+    );
+  }
+  if (tool.status === 'update_available' && tool.latestVersion) {
+    return (
+      <span
+        className="ml-2 shrink-0 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"
+        title={localize('com_toolbox_badge_update_available')}
+      >
+        {`${tool.local?.installed_version} → v${tool.latestVersion}`}
+      </span>
+    );
+  }
+  const version = tool.local?.installed_version;
+  const label = version
+    ? localize('com_toolbox_badge_installed', { version })
+    : localize('com_toolbox_badge_installed_plain');
+  return (
+    <span
+      className="ml-2 shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400"
+      title={label}
+    >
+      {label}
+    </span>
   );
 }

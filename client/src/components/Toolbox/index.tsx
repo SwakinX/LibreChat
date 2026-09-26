@@ -1,33 +1,46 @@
 import { useMemo, useState } from 'react';
 import { Button } from '@librechat/client';
 import { useSearchParams } from 'react-router-dom';
-import { AlertTriangle, Play, Wrench } from 'lucide-react';
+import { AlertTriangle, MonitorX, Play, Wrench } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
 import { useAuthContext, useDocumentTitle, useLocalize } from '~/hooks';
 import OpenSidebar from '~/components/Chat/Menus/OpenSidebar';
-import { useExecuteTool, useToolsQuery } from './api';
+import { isDesktopTool, type MergedTool } from './toolStatus';
 import NextcloudConnect from './NextcloudConnect';
+import { useMergedTools } from './toolhostHooks';
+import ToolhostStatus from './ToolhostStatus';
+import LocalRunner from './LocalRunner';
+import { useExecuteTool } from './api';
 import SchemaForm from './SchemaForm';
 import ResultView from './ResultView';
 import { cn } from '~/utils';
 
 /** TerraVox Toolbox: manifest-driven tool runner (/toolbox). The sidebar's
- * ToolboxSection lists the tools; this surface runs the one in `?tool=`. */
+ * ToolboxSection lists the tools; this surface runs the one in `?tool=`.
+ * Desktop tools run on the user's machine via the local Toolhost (browser
+ * direct); server/web tools go through the gateway execute proxy. */
 export default function Toolbox() {
   const localize = useLocalize();
   const { user } = useAuthContext();
   const [searchParams] = useSearchParams();
   const toolId = searchParams.get('tool');
-  const { data: catalog } = useToolsQuery();
+  const { tools, online } = useMergedTools();
   const selected = useMemo(
-    () => (catalog?.tools ?? []).find((t) => t.tool_id === toolId) ?? null,
-    [catalog, toolId],
+    () => tools.find((tool) => tool.manifest.tool_id === toolId) ?? null,
+    [tools, toolId],
   );
   useDocumentTitle(
     selected
-      ? `${selected.display_name} · ${localize('com_toolbox_nav')}`
+      ? `${selected.manifest.display_name} · ${localize('com_toolbox_nav')}`
       : `${localize('com_toolbox_nav')} · ${user?.username ?? 'TerraVox'}`,
   );
+
+  const selectedIsDesktop = selected != null && isDesktopTool(selected.manifest);
+  /* Offline hint is only actionable for desktop tools — server-tool users
+   * lose nothing when the Toolhost is down. */
+  const showOfflineHint =
+    !online &&
+    (selectedIsDesktop || (!selected && tools.some((tool) => isDesktopTool(tool.manifest))));
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-surface-primary text-text-primary">
@@ -38,9 +51,9 @@ export default function Toolbox() {
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex min-w-0 items-center gap-2">
             <h1 className="truncate text-base font-semibold">
-              {selected ? selected.display_name : localize('com_toolbox_title')}
+              {selected ? selected.manifest.display_name : localize('com_toolbox_title')}
             </h1>
-            {selected?.dangerous && (
+            {selected?.manifest.dangerous && (
               <span className="flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="size-3" aria-hidden="true" />
                 {localize('com_toolbox_dangerous')}
@@ -48,28 +61,45 @@ export default function Toolbox() {
             )}
           </div>
           <span className="truncate text-xs text-text-tertiary">
-            {selected ? selected.description : localize('com_toolbox_subtitle')}
+            {selected ? selected.manifest.description : localize('com_toolbox_subtitle')}
           </span>
         </div>
         {selected && (
-          <code className="text-text-quaternary shrink-0 text-xs">{selected.tool_id}</code>
+          <code className="text-text-quaternary shrink-0 text-xs">{selected.manifest.tool_id}</code>
         )}
+        <ToolhostStatus />
         <NextcloudConnect />
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-          {selected ? (
-            <ToolRunner key={selected.tool_id} manifest={selected} />
-          ) : (
-            <p className="py-16 text-center text-sm text-text-tertiary">
-              {localize('com_toolbox_select_hint')}
-            </p>
+          {showOfflineHint && (
+            <div className="flex items-center gap-2 rounded-lg border border-border-medium bg-surface-tertiary px-3 py-2 text-sm text-text-secondary">
+              <MonitorX className="size-4 shrink-0" aria-hidden="true" />
+              {localize('com_toolbox_toolhost_desktop_offline')}
+            </div>
           )}
+          <ToolBody selected={selected} />
         </div>
       </div>
     </div>
   );
+}
+
+/** Desktop tools run locally via the Toolhost; server tools via the Gateway. */
+function ToolBody({ selected }: { selected: MergedTool | null }) {
+  const localize = useLocalize();
+  if (!selected) {
+    return (
+      <p className="py-16 text-center text-sm text-text-tertiary">
+        {localize('com_toolbox_select_hint')}
+      </p>
+    );
+  }
+  if (isDesktopTool(selected.manifest)) {
+    return <LocalRunner key={selected.manifest.tool_id} tool={selected} />;
+  }
+  return <ToolRunner key={selected.manifest.tool_id} manifest={selected.manifest} />;
 }
 
 function ToolRunner({ manifest }: { manifest: ToolManifest }) {
