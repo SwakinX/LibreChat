@@ -1,20 +1,24 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Spinner } from '@librechat/client';
-import { CircleSlash, Loader2, Play, Square, Trash2 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, CircleSlash, Loader2, Play, Square, Trash2, Wrench } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
 import type { TranslationKeys } from '~/hooks/useLocalize';
+import type { InstallJob, LocalRun } from './toolhost';
 import type { MergedTool } from './toolStatus';
-import type { InstallJob } from './toolhost';
 import {
   useDeleteLocalTool,
   useInstallJob,
   useInstallTool,
   useLocalRun,
   useRunLogs,
+  useRunsForTool,
   useStartLocalRun,
   useStopRun,
+  useToolhostHealth,
 } from './toolhostHooks';
 import { isDesktopTool } from './toolStatus';
+import { useReportToolRun } from './api';
 import { useLocalize } from '~/hooks';
 import SchemaForm from './SchemaForm';
 import ResultView from './ResultView';
@@ -47,6 +51,26 @@ const RUN_FAIL_KEYS: Record<string, TranslationKeys> = {
   stopped: 'com_toolbox_run_stopped',
 };
 
+/** Every local-run status → label for the history rows (dot carries color,
+ * the label carries meaning — never color alone). */
+const RUN_STATUS_KEYS: Record<string, TranslationKeys> = {
+  preparing: 'com_toolbox_runs_status_preparing',
+  running: 'com_toolbox_runs_status_running',
+  succeeded: 'com_toolbox_runs_status_succeeded',
+  failed: 'com_toolbox_runs_status_failed',
+  stopped: 'com_toolbox_runs_status_stopped',
+  timeout: 'com_toolbox_runs_status_timeout',
+};
+
+const RUN_STATUS_DOT: Record<string, string> = {
+  preparing: 'bg-text-tertiary',
+  running: 'animate-pulse bg-indigo-500',
+  succeeded: 'bg-emerald-500',
+  failed: 'bg-text-error',
+  stopped: 'bg-amber-500',
+  timeout: 'bg-amber-500',
+};
+
 /**
  * Desktop-tool surface: install/update/remove with live job progress, plus
  * local execution (params JSON → argv, result rendered inline). The installed
@@ -55,6 +79,7 @@ const RUN_FAIL_KEYS: Record<string, TranslationKeys> = {
  */
 export default function LocalRunner({ tool }: { tool: MergedTool }) {
   const localize = useLocalize();
+  const queryClient = useQueryClient();
   const { manifest, local, status, latestVersion } = tool;
   const effectiveManifest = useMemo<ToolManifest>(
     () => ({
@@ -81,6 +106,9 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
   const run = useLocalRun(runId);
   const stopRun = useStopRun();
   const logs = useRunLogs(runId, showLogs);
+  const reportRun = useReportToolRun();
+  /* One report per run_id, ever — refetches/StrictMode double-effects included. */
+  const reportedRuns = useRef<Set<string>>(new Set());
 
   /* Installing a new version replaces the tool — drop stale run state. */
   useEffect(() => {
@@ -96,6 +124,30 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
       setJobId(null);
     }
   }, [job.data?.state]);
+
+  /* Terminal run → best-effort usage report (once per run_id; failures are
+   * swallowed in the mutation) + refresh the bottom history section. */
+  const runData = run.data;
+  useEffect(() => {
+    if (!runData || runData.status === 'preparing' || runData.status === 'running') {
+      return;
+    }
+    if (reportedRuns.current.has(runData.run_id)) {
+      return;
+    }
+    reportedRuns.current.add(runData.run_id);
+    const started = Date.parse(runData.started_at ?? '');
+    const finished = Date.parse(runData.finished_at ?? '');
+    reportRun.mutate({
+      tool_id: manifest.tool_id,
+      version: runData.version ?? local?.installed_version ?? undefined,
+      status: runData.status as 'succeeded' | 'failed' | 'stopped' | 'timeout',
+      duration_ms:
+        Number.isFinite(started) && Number.isFinite(finished) ? Math.max(0, finished - started) : 0,
+      argument_keys: Object.keys(runData.arguments ?? {}).slice(0, 16),
+    });
+    void queryClient.invalidateQueries({ queryKey: ['toolhost', 'runs', manifest.tool_id] });
+  }, [runData, reportRun, manifest.tool_id, local?.installed_version, queryClient]);
 
   const distribution = manifest.execution?.distribution;
   const installBody = () => {
@@ -132,6 +184,29 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
     }
   };
 
+  /* Repair = reinstall the currently installed version (same owner/repo).
+   * Only offered when the manifest carries distribution info — local-only
+   * tools without a registered source can only be removed. */
+  const startRepair = async () => {
+    setJobId(null);
+    const source = distribution?.source;
+    if (!source) {
+      setRunError(localize('com_toolbox_install_no_source'));
+      return;
+    }
+    try {
+      const started = await install.mutateAsync({
+        tool_id: manifest.tool_id,
+        owner: source.owner,
+        repo: source.repo,
+        ...(local?.installed_version ? { version: local.installed_version } : {}),
+      });
+      setJobId(started.job_id);
+    } catch {
+      /* guard handled */
+    }
+  };
+
   const runActive = run.data?.status === 'preparing' || run.data?.status === 'running';
   const runTerminalFailed =
     run.data && TERMINAL_RUN_STATES.includes(run.data.status) ? run.data : null;
@@ -165,6 +240,7 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
 
   const dangerous = Boolean(effectiveManifest.dangerous);
   const confirmRequired = dangerous;
+  const damaged = tool.damaged === true;
 
   return (
     <div className="flex flex-col gap-5">
@@ -245,6 +321,26 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
             )}
           </div>
         )}
+        {damaged && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
+          >
+            <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 flex-1">{localize('com_toolbox_repair_hint')}</span>
+            {distribution?.source && (
+              <Button
+                variant="default"
+                className="flex items-center gap-1.5"
+                disabled={install.isLoading}
+                onClick={startRepair}
+              >
+                <Wrench className="size-3.5" aria-hidden="true" />
+                {localize('com_toolbox_repair')}
+              </Button>
+            )}
+          </div>
+        )}
         {Boolean(install.error) && !(install.error as { status?: number } | null)?.status && (
           <p className="text-text-error text-xs" role="alert">
             {(install.error as Error | null)?.message}
@@ -291,7 +387,9 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
           <Button
             variant="default"
             className="flex items-center gap-1.5"
-            disabled={Boolean(runActive) || startRun.isLoading || (confirmRequired && !ackDanger)}
+            disabled={
+              Boolean(runActive) || startRun.isLoading || (confirmRequired && !ackDanger) || damaged
+            }
             onClick={start}
           >
             <Play className="size-3.5" aria-hidden="true" />
@@ -362,8 +460,82 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
           <ResultView outcome={outcome} manifest={effectiveManifest} />
         </section>
       )}
+
+      <RunRecords toolId={manifest.tool_id} />
     </div>
   );
+}
+
+/** Tool-page bottom section: run count + compact newest-first rows. No
+ * detail expansion, no filters — that surface lives in the admin stats. */
+function RunRecords({ toolId }: { toolId: string }) {
+  const localize = useLocalize();
+  const health = useToolhostHealth();
+  const query = useRunsForTool(toolId, health.data === true);
+  const runs = query.data?.runs ?? [];
+  return (
+    <section className="flex flex-col gap-2" aria-label={localize('com_toolbox_runs_title')}>
+      <h3 className="text-text-quaternary text-xs font-semibold uppercase tracking-wide">
+        {localize('com_toolbox_runs_section', { count: runs.length, limit: 200 })}
+      </h3>
+      {runs.length === 0 ? (
+        <p className="text-xs text-text-tertiary">{localize('com_toolbox_runs_empty')}</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-border-light">
+          {runs.map((item) => (
+            <RunRow key={item.run_id} run={item} localize={localize} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function RunRow({ run, localize }: { run: LocalRun; localize: ReturnType<typeof useLocalize> }) {
+  const duration = formatRunDuration(run);
+  return (
+    <li className="flex items-center gap-2 py-1.5 text-xs text-text-secondary">
+      <span
+        className={cn(
+          'size-1.5 shrink-0 rounded-full',
+          RUN_STATUS_DOT[run.status] ?? 'bg-text-tertiary',
+        )}
+        aria-hidden="true"
+      />
+      <span className="w-12 shrink-0">
+        {localize(RUN_STATUS_KEYS[run.status] ?? 'com_toolbox_runs_status_failed')}
+      </span>
+      <span className="min-w-0 flex-1 truncate">
+        {run.created_at ? relativeTime(run.created_at, localize) : ''}
+      </span>
+      {duration != null && <span className="shrink-0 text-text-tertiary">{duration}</span>}
+    </li>
+  );
+}
+
+function formatRunDuration(run: LocalRun): string | null {
+  const started = Date.parse(run.started_at ?? '');
+  const finished = Date.parse(run.finished_at ?? '');
+  if (!Number.isFinite(started) || !Number.isFinite(finished) || finished < started) {
+    return null;
+  }
+  const ms = finished - started;
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+function relativeTime(iso: string, localize: ReturnType<typeof useLocalize>): string {
+  const minutes = Math.floor((Date.now() - Date.parse(iso)) / 60_000);
+  if (minutes < 1) {
+    return localize('com_toolbox_runs_just_now');
+  }
+  if (minutes < 60) {
+    return localize('com_toolbox_runs_minutes_ago', { count: minutes });
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return localize('com_toolbox_runs_hours_ago', { count: hours });
+  }
+  return localize('com_toolbox_runs_days_ago', { count: Math.floor(hours / 24) });
 }
 
 function JobPanel({ job, version }: { job: InstallJob | null | undefined; version?: string }) {

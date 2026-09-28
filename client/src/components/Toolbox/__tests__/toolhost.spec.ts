@@ -7,6 +7,7 @@ import {
   fetchInstallJob,
   fetchLocalTools,
   fetchPairingCode,
+  fetchRuns,
   postInstall,
   postRun,
   TOOLHOST_BASE,
@@ -144,5 +145,16 @@ describe('toolhost fetch client', () => {
     expect(fetchMock.mock.calls[0][0]).toBe(
       `${TOOLHOST_BASE}/v1/local/install-jobs/job%20id%2Fslash`,
     );
+  });
+
+  it('fetchRuns forwards tool_id/limit and drops them when unset', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ runs: [] }));
+    await fetchRuns({ toolId: 'wangjianbo.toolsdemo', limit: 200 });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `${TOOLHOST_BASE}/v1/local/runs?tool_id=wangjianbo.toolsdemo&limit=200`,
+    );
+
+    await fetchRuns();
+    expect(fetchMock.mock.calls[1][0]).toBe(`${TOOLHOST_BASE}/v1/local/runs`);
   });
 });

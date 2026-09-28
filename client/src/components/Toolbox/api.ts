@@ -99,3 +99,22 @@ export const useExecuteTool = (toolId: string) =>
     mutationFn: (args: { params: Record<string, unknown>; confirmed?: boolean }) =>
       post<ExecuteResult>(`/api/terravox/tools/${encodeURIComponent(toolId)}/execute`, args),
   });
+
+export type RunReportBody = {
+  tool_id: string;
+  version?: string;
+  /** Terminal local-run status (preparing/running are never reported). */
+  status: 'succeeded' | 'failed' | 'stopped' | 'timeout';
+  duration_ms: number;
+  /** Top-level argument names only — values never leave the machine. */
+  argument_keys?: string[];
+};
+
+/** Best-effort direct-run report for the usage stats (local-tool-plan §8).
+ * Failures are swallowed: the server is not on the local execution path. */
+export const useReportToolRun = () =>
+  useMutation({
+    mutationFn: (body: RunReportBody) =>
+      post<{ recorded: boolean }>('/api/terravox/runs/report', body),
+    onError: () => undefined,
+  });

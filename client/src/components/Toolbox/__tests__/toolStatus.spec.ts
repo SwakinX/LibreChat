@@ -98,6 +98,22 @@ describe('mergeCatalogWithLocal', () => {
     expect(merged[0].manifest.execution?.kind).toBe('desktop');
     expect(merged[0].manifest.version).toBe('2.3.4');
   });
+
+  it('propagates the damaged flag for catalog and local-only entries only when true', () => {
+    const healthy = record('demo.pkg', '1.0.0');
+    const broken = { ...record('demo.broken', '1.0.0'), damaged: true };
+    const solo = { ...record('solo.tool', '2.3.4'), damaged: true };
+
+    const merged = mergeCatalogWithLocal(
+      [desktopTool('demo.pkg', '1.0.0'), desktopTool('demo.broken', '1.0.0')],
+      [healthy, broken, solo],
+    );
+
+    const byId = new Map(merged.map((entry) => [entry.manifest.tool_id, entry]));
+    expect(byId.get('demo.pkg')?.damaged).toBe(false);
+    expect(byId.get('demo.broken')?.damaged).toBe(true);
+    expect(byId.get('solo.tool')?.damaged).toBe(true);
+  });
 });
 
 describe('synthesizeManifest', () => {

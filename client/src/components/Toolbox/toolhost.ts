@@ -25,6 +25,9 @@ export type LocalToolRecord = {
   launcher?: string | null;
   runtime?: string | null;
   dangerous?: boolean;
+  /** Computed file-presence flag (toolhost-local/v1 1.3.0): install dir or
+   * launcher missing — run is refused with 409 until a reinstall repairs it. */
+  damaged?: boolean;
   timeout_minutes?: number | null;
   parameters?: {
     type: 'object';
@@ -235,6 +238,22 @@ export async function postRun(
 
 export async function fetchRun(runId: string): Promise<LocalRun> {
   return parse(await toolhostFetch(`/v1/local/runs/${encodeURIComponent(runId)}`));
+}
+
+/** Run history for the tool-page bottom section (toolhost-local/v1 1.3.0):
+ * newest first, list items carry no artifacts. */
+export async function fetchRuns(
+  opts: { toolId?: string; limit?: number } = {},
+): Promise<{ runs: LocalRun[] }> {
+  const params = new URLSearchParams();
+  if (opts.toolId) {
+    params.set('tool_id', opts.toolId);
+  }
+  if (opts.limit != null) {
+    params.set('limit', String(opts.limit));
+  }
+  const query = params.toString();
+  return parse(await toolhostFetch(`/v1/local/runs${query ? `?${query}` : ''}`));
 }
 
 export async function fetchRunLogs(runId: string): Promise<{ stdout: string[]; stderr: string[] }> {

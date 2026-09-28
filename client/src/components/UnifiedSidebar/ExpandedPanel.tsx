@@ -14,6 +14,19 @@ import { cn } from '~/utils';
 import store from '~/store';
 
 const AccountSettings = lazy(() => import('~/components/Nav/AccountSettings'));
+/* TerraVox status buttons (Toolhost pairing + cloud drive) — compact icon
+ * triggers with popovers, parked above account settings per the 2026-09-28
+ * directive. Lazy: they pull the Toolbox hook graph (React Query + jotai). */
+const ToolhostStatusCompact = lazy(() =>
+  import('~/components/Toolbox/ToolhostStatus').then((m) => ({
+    default: m.ToolhostStatusCompact,
+  })),
+);
+const NextcloudConnectCompact = lazy(() =>
+  import('~/components/Toolbox/NextcloudConnect').then((m) => ({
+    default: m.NextcloudConnectCompact,
+  })),
+);
 
 const NewChatButton = memo(function NewChatButton({
   setActive,
@@ -192,7 +205,14 @@ function ExpandedPanel({
         ))}
       </div>
 
-      <div className="mt-auto">
+      <div className="mt-auto flex flex-col items-center gap-1">
+        <Suspense fallback={<Skeleton className="h-8 w-8 rounded-lg" />}>
+          <ToolhostStatusCompact />
+        </Suspense>
+        <Suspense fallback={<Skeleton className="h-8 w-8 rounded-lg" />}>
+          <NextcloudConnectCompact />
+        </Suspense>
+        <div className="mx-2 mb-1 w-full border-b border-border-light" />
         <Suspense fallback={<Skeleton className="h-9 w-9 rounded-lg" />}>
           <AccountSettings collapsed />
         </Suspense>

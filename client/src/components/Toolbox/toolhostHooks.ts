@@ -16,6 +16,7 @@ import {
   fetchPairingCode,
   fetchRun,
   fetchRunLogs,
+  fetchRuns,
   postInstall,
   postRun,
   postStopRun,
@@ -29,6 +30,7 @@ const HEALTH_POLL_MS = 15_000;
 const LOCAL_TOOLS_POLL_MS = 30_000;
 const INSTALL_JOB_POLL_MS = 1_000;
 const RUN_POLL_MS = 1_500;
+const RUNS_HISTORY_POLL_MS = 30_000;
 
 export function usePairingCode() {
   /* Opt-in pairing atoms live in ./atoms; saving resets the rejected hint. */
@@ -227,6 +229,19 @@ export function useRunLogs(runId: string | null, open: boolean) {
     queryKey: ['toolhost', 'run-logs', runId],
     queryFn: () => fetchRunLogs(runId as string),
     enabled: !!runId && open,
+    retry: false,
+  });
+}
+
+/** Per-tool run history for the tool-page bottom section (list items carry no
+ * artifacts). Refreshed when the runner reports a terminal state and on a slow
+ * interval otherwise. */
+export function useRunsForTool(toolId: string | null | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ['toolhost', 'runs', toolId],
+    queryFn: () => fetchRuns({ toolId: toolId as string, limit: 200 }),
+    enabled: enabled && !!toolId,
+    refetchInterval: RUNS_HISTORY_POLL_MS,
     retry: false,
   });
 }

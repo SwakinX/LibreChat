@@ -214,7 +214,8 @@ export default function ToolboxSection() {
   );
 }
 
-/** Desktop-tool local-state chip: gray not-installed / emerald vX / amber vX→vY. */
+/** Desktop-tool local-state chip: red damaged / gray not-installed / emerald
+ * vX / amber vX→vY. Damaged wins over version state — it blocks running. */
 function LocalBadge({ tool }: { tool: MergedTool }) {
   const localize = useLocalize();
   if (tool.status === 'not_installed') {
@@ -224,6 +225,16 @@ function LocalBadge({ tool }: { tool: MergedTool }) {
         title={localize('com_toolbox_badge_not_installed')}
       >
         {localize('com_toolbox_badge_not_installed')}
+      </span>
+    );
+  }
+  if (tool.damaged) {
+    return (
+      <span
+        className="border-text-error/40 bg-text-error/10 text-text-error ml-2 shrink-0 rounded-full border px-1.5 py-0.5 text-[10px]"
+        title={localize('com_toolbox_repair_hint')}
+      >
+        {localize('com_toolbox_damaged')}
       </span>
     );
   }

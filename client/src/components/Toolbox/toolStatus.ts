@@ -15,6 +15,9 @@ export type MergedTool = {
   manifest: ToolManifest;
   local?: LocalToolRecord;
   status: LocalToolStatus;
+  /** Computed file-presence flag from the Toolhost (1.3.0): install dir or
+   * launcher missing. Drives the damaged badge + repair entry. */
+  damaged?: boolean;
   /** Admin-approved version from the catalog manifest (contracts 2.8.0:
    * unapproved repo releases are invisible to the frontend). */
   latestVersion?: string;
@@ -66,12 +69,18 @@ export function mergeCatalogWithLocal(
       manifest,
       local,
       status: outdated ? 'update_available' : 'installed',
+      damaged: local.damaged === true,
       latestVersion,
     };
   });
   /* Local-only installs (catalog miss / Gitea offline) still show up in the sidebar. */
   for (const local of byId.values()) {
-    merged.push({ manifest: synthesizeManifest(local), local, status: 'installed' });
+    merged.push({
+      manifest: synthesizeManifest(local),
+      local,
+      status: 'installed',
+      damaged: local.damaged === true,
+    });
   }
   return merged;
 }

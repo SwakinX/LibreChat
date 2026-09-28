@@ -8,7 +8,7 @@ import type { InstallJob, LocalRun } from '../toolhost';
 import type { MergedTool } from '../toolStatus';
 import LocalRunner from '../LocalRunner';
 
-/* Controllable hook state — LocalRunner only consumes these seven hooks. */
+/* Controllable hook state — LocalRunner consumes these hooks. */
 const mockHooks = {
   install: { isLoading: false, error: null as unknown, mutateAsync: jest.fn() },
   remove: { isLoading: false, error: null as unknown, mutate: jest.fn() },
@@ -17,7 +17,12 @@ const mockHooks = {
   run: { data: null as LocalRun | null },
   stopRun: { isLoading: false, mutate: jest.fn() },
   logs: { data: null as { stdout: string[]; stderr: string[] } | null },
+  runs: { data: null as { runs: LocalRun[] } | null },
+  health: { data: true as boolean | undefined },
 };
+
+const mockReport = { mutate: jest.fn() };
+const mockInvalidate = jest.fn();
 
 jest.mock('../toolhostHooks', () => ({
   useInstallTool: () => mockHooks.install,
@@ -27,6 +32,16 @@ jest.mock('../toolhostHooks', () => ({
   useLocalRun: () => mockHooks.run,
   useStopRun: () => mockHooks.stopRun,
   useRunLogs: () => mockHooks.logs,
+  useRunsForTool: () => mockHooks.runs,
+  useToolhostHealth: () => mockHooks.health,
+}));
+
+jest.mock('../api', () => ({
+  useReportToolRun: () => mockReport,
+}));
+
+jest.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => ({ invalidateQueries: mockInvalidate }),
 }));
 
 /* Keys pass through; option values appended so interpolated texts are assertable. */
@@ -98,6 +113,10 @@ beforeEach(() => {
   mockHooks.run = { data: null };
   mockHooks.stopRun = { isLoading: false, mutate: jest.fn() };
   mockHooks.logs = { data: null };
+  mockHooks.runs = { data: null };
+  mockHooks.health = { data: true };
+  mockReport.mutate = jest.fn();
+  mockInvalidate.mockClear();
 });
 
 describe('LocalRunner', () => {
@@ -224,5 +243,101 @@ describe('LocalRunner', () => {
     fireEvent.click(screen.getByRole('button', { name: 'com_toolbox_show_logs' }));
     expect(screen.getByText('line-out')).toBeInTheDocument();
     expect(screen.getByText('line-err')).toBeInTheDocument();
+  });
+
+  it('terminal run reports once per run_id with summary-only fields', async () => {
+    const terminalRun: LocalRun = {
+      run_id: 'r9',
+      tool_id: 'wangjianbo.toolsdemo',
+      version: '1.0.0',
+      status: 'failed',
+      started_at: '2026-09-28T10:00:00.000Z',
+      finished_at: '2026-09-28T10:00:08.500Z',
+      arguments: { text: 'secret-value', count: 3 },
+    };
+    mockHooks.run.data = terminalRun;
+    const merged = tool({ status: 'installed', local: local('1.0.0') });
+    const { rerender } = render(<LocalRunner tool={merged} />);
+
+    await waitFor(() => expect(mockReport.mutate).toHaveBeenCalledTimes(1));
+    /* argument values never leave the machine — key names only */
+    expect(mockReport.mutate).toHaveBeenCalledWith({
+      tool_id: 'wangjianbo.toolsdemo',
+      version: '1.0.0',
+      status: 'failed',
+      duration_ms: 8500,
+      argument_keys: ['text', 'count'],
+    });
+    expect(mockInvalidate).toHaveBeenCalledWith({
+      queryKey: ['toolhost', 'runs', 'wangjianbo.toolsdemo'],
+    });
+
+    /* a refetch delivering a new object for the same run_id must not re-report */
+    mockHooks.run.data = { ...terminalRun };
+    rerender(<LocalRunner tool={merged} />);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(mockReport.mutate).toHaveBeenCalledTimes(1);
+  });
+
+  it('bottom run-history section: count header + compact newest-first rows', () => {
+    const now = Date.now();
+    mockHooks.runs.data = {
+      runs: [
+        {
+          run_id: 'r2',
+          tool_id: 'wangjianbo.toolsdemo',
+          status: 'succeeded',
+          created_at: new Date(now - 120_000).toISOString(),
+          started_at: new Date(now - 120_000).toISOString(),
+          finished_at: new Date(now - 118_800).toISOString(),
+        },
+        {
+          run_id: 'r1',
+          tool_id: 'wangjianbo.toolsdemo',
+          status: 'failed',
+          created_at: new Date(now - 3_600_000).toISOString(),
+          started_at: new Date(now - 3_600_000).toISOString(),
+          finished_at: new Date(now - 3_592_000).toISOString(),
+        },
+      ],
+    };
+    render(<LocalRunner tool={tool({ status: 'installed', local: local('1.0.0') })} />);
+
+    expect(screen.getByRole('region', { name: 'com_toolbox_runs_title' })).toBeInTheDocument();
+    expect(screen.getByText('com_toolbox_runs_section:2,200')).toBeInTheDocument();
+    /* status is dot + label (never color alone) */
+    expect(screen.getByText('com_toolbox_runs_status_succeeded')).toBeInTheDocument();
+    expect(screen.getByText('com_toolbox_runs_status_failed')).toBeInTheDocument();
+    expect(screen.getByText('com_toolbox_runs_minutes_ago:2')).toBeInTheDocument();
+    expect(screen.getByText('com_toolbox_runs_hours_ago:1')).toBeInTheDocument();
+    expect(screen.getByText('1.2s')).toBeInTheDocument();
+    expect(screen.getByText('8.0s')).toBeInTheDocument();
+  });
+
+  it('empty history shows the placeholder, not a bare heading', () => {
+    mockHooks.runs.data = { runs: [] };
+    render(<LocalRunner tool={tool({ status: 'installed', local: local('1.0.0') })} />);
+    expect(screen.getByText('com_toolbox_runs_empty')).toBeInTheDocument();
+  });
+
+  it('damaged: warning alert, run blocked, repair reinstalls the installed version', async () => {
+    mockHooks.install.mutateAsync.mockResolvedValue({ job_id: 'j9' });
+    render(
+      <LocalRunner tool={tool({ status: 'installed', local: local('1.0.0'), damaged: true })} />,
+    );
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('com_toolbox_repair_hint');
+    expect(screen.getByRole('button', { name: 'com_toolbox_run' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'com_toolbox_repair' }));
+    await waitFor(() =>
+      expect(mockHooks.install.mutateAsync).toHaveBeenCalledWith({
+        tool_id: 'wangjianbo.toolsdemo',
+        owner: 'wangjianbo',
+        repo: 'toolsdemo',
+        version: '1.0.0',
+      }),
+    );
   });
 });

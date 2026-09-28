@@ -5,8 +5,8 @@ import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { Provider as JotaiProvider, createStore } from 'jotai';
+import ToolhostStatus, { ToolhostStatusCompact } from '../ToolhostStatus';
 import { pairingCodeAtom, pairingRejectedAtom } from '../atoms';
-import ToolhostStatus from '../ToolhostStatus';
 
 let mockOnline: boolean | undefined;
 let mockAuto: {
@@ -23,6 +23,11 @@ jest.mock('../toolhostHooks', () => ({
 
 jest.mock('~/hooks', () => ({
   useLocalize: () => (key: string) => key,
+}));
+
+/* StatusPopover (compact variant) styles via cn — keep it a pure join here. */
+jest.mock('~/utils', () => ({
+  cn: (...classes: unknown[]) => classes.filter(Boolean).join(' '),
 }));
 
 const renderChip = () => {
@@ -104,5 +109,73 @@ describe('ToolhostStatus chip', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'com_toolbox_pair_retry' }));
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ToolhostStatusCompact (sidebar icon strip)', () => {
+  beforeEach(() => {
+    mockOnline = undefined;
+    mockAuto = { phase: 'idle', reason: null, retry: jest.fn() };
+  });
+
+  const renderCompact = () => {
+    const store = createStore();
+    store.set(pairingCodeAtom, '');
+    const utils = render(
+      <JotaiProvider store={store}>
+        <ToolhostStatusCompact />
+      </JotaiProvider>,
+    );
+    return { store, ...utils };
+  };
+
+  it('holds the icon-slot height while the probe is pending (no offline flash)', () => {
+    const { container } = renderCompact();
+    const slot = container.firstElementChild;
+    expect(slot?.tagName).toBe('SPAN');
+    expect(slot?.className).toContain('h-8');
+  });
+
+  it('offline: closed by default, opens to the guidance hint, Escape closes', () => {
+    mockOnline = false;
+    renderCompact();
+    const button = screen.getByRole('button', { name: /com_toolbox_status_toolhost/ });
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('com_toolbox_toolhost_offline_hint')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('online unpaired: popover carries the manual paste (short codes rejected)', () => {
+    mockOnline = true;
+    const { store } = renderCompact();
+    fireEvent.click(screen.getByRole('button', { name: /com_toolbox_status_toolhost/ }));
+
+    const input = screen.getByPlaceholderText('com_toolbox_toolhost_pair_prompt');
+    fireEvent.change(input, { target: { value: 'too-short' } });
+    fireEvent.submit(input.closest('form') as HTMLFormElement);
+    expect(screen.getByText('com_toolbox_toolhost_code_short')).toBeInTheDocument();
+    expect(store.get(pairingCodeAtom)).toBe('');
+
+    fireEvent.change(input, { target: { value: '  abcdefghij0123456789  ' } });
+    fireEvent.submit(input.closest('form') as HTMLFormElement);
+    expect(store.get(pairingCodeAtom)).toBe('abcdefghij0123456789');
+  });
+
+  it('paired: popover shows the local-run hint instead of the form', () => {
+    mockOnline = true;
+    const { store } = renderCompact();
+    act(() => {
+      store.set(pairingCodeAtom, 'abcdefghij0123456789');
+    });
+    fireEvent.click(screen.getByRole('button', { name: /com_toolbox_status_toolhost/ }));
+    expect(screen.getByText('com_toolbox_local_run_hint')).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('com_toolbox_toolhost_pair_prompt'),
+    ).not.toBeInTheDocument();
   });
 });

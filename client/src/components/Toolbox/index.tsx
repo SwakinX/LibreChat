@@ -4,11 +4,8 @@ import { useSearchParams } from 'react-router-dom';
 import { AlertTriangle, MonitorX, Play, Wrench } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
 import { useAuthContext, useDocumentTitle, useLocalize } from '~/hooks';
-import OpenSidebar from '~/components/Chat/Menus/OpenSidebar';
 import { isDesktopTool, type MergedTool } from './toolStatus';
-import NextcloudConnect from './NextcloudConnect';
 import { useMergedTools } from './toolhostHooks';
-import ToolhostStatus from './ToolhostStatus';
 import LocalRunner from './LocalRunner';
 import { useExecuteTool } from './api';
 import SchemaForm from './SchemaForm';
@@ -43,9 +40,10 @@ export default function Toolbox() {
     (selectedIsDesktop || (!selected && tools.some((tool) => isDesktopTool(tool.manifest))));
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-surface-primary text-text-primary">
+    /* No bg class: the content pane inherits the body theme background —
+     * identical to the chat page (2026-09-28 user directive). */
+    <div className="flex h-full flex-col overflow-hidden text-text-primary">
       <header className="flex items-center gap-3 border-b border-border-light px-4 py-3">
-        <OpenSidebar />
         <Wrench className="size-5 shrink-0 text-text-tertiary" aria-hidden="true" />
         {/* 工具标题与信息直接放在页面标题栏：选中工具后取代静态"工具箱"标题 */}
         <div className="flex min-w-0 flex-1 flex-col">
@@ -67,8 +65,6 @@ export default function Toolbox() {
         {selected && (
           <code className="text-text-quaternary shrink-0 text-xs">{selected.manifest.tool_id}</code>
         )}
-        <ToolhostStatus />
-        <NextcloudConnect />
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
