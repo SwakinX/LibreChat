@@ -3085,5 +3085,13 @@
   "com_toolbox_runs_params": "Parameters",
   "com_toolbox_runs_params_empty": "No parameters",
   "com_toolbox_runs_result": "Result",
-  "com_toolbox_runs_restore": "Restore parameters"
+  "com_toolbox_runs_restore": "Restore parameters",
+  "com_toolbox_map_open": "Map",
+  "com_toolbox_map_close": "Back to tools",
+  "com_toolbox_map_loading": "Loading map…",
+  "com_toolbox_map_not_configured": "Map service is not configured yet — ask the admin to fill in the iServer settings.",
+  "com_toolbox_widget_pick_file": "Choose file…",
+  "com_toolbox_widget_change_file": "Change file",
+  "com_toolbox_widget_no_file": "No file selected",
+  "com_toolbox_file_download": "Download"
 }

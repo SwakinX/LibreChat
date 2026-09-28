@@ -196,3 +196,55 @@ export const useChoicesFrom = (
     staleTime: 5 * 60_000,
     retry: false,
   });
+
+export type MapConfig = {
+  configured: boolean;
+  tile_url_template: string;
+  center: [number, number];
+  zoom: number;
+};
+
+/** Base-tile template + initial view for the map panel (same-origin via the
+ * nginx /iserver/ reverse proxy; no credentials reach the browser). */
+export const useMapConfig = () =>
+  useQuery({
+    queryKey: ['terravox', 'map', 'config'],
+    queryFn: () => get<MapConfig>('/api/terravox/map/config'),
+    staleTime: 10 * 60_000,
+    retry: false,
+  });
+
+/** Multipart execute channel for upload-widget tools (2.15.0): the file bytes
+ * stream to the gateway untouched; the JSON params ride along as a form field. */
+export async function executeUpload(
+  toolId: string,
+  args: { file: File; params: Record<string, unknown>; confirmed?: boolean },
+): Promise<ExecuteResult> {
+  const form = new FormData();
+  form.append('file', args.file);
+  form.append('params', JSON.stringify(args.params));
+  if (args.confirmed) {
+    form.append('confirmed', 'true');
+  }
+  try {
+    return (await request.post(
+      `/api/terravox/tools/${encodeURIComponent(toolId)}/execute-upload`,
+      form,
+    )) as ExecuteResult;
+  } catch (err) {
+    throw toError(err);
+  }
+}
+
+/** Stream a file from the download proxy and hand it to the browser. */
+export async function downloadProxyFile(url: string, filename: string): Promise<void> {
+  const blob = (await request.get(url, { responseType: 'blob' })) as Blob;
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}

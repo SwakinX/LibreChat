@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Button } from '@librechat/client';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, MonitorX, Play, Wrench } from 'lucide-react';
+import { AlertTriangle, Map as MapIcon, MonitorX, Play, Wrench, X } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
 import {
   isDesktopTool,
@@ -13,14 +13,15 @@ import {
 } from './toolStatus';
 import { RunRecordsSection, type RunRecordRow } from './RunRecordsSection';
 import { useAuthContext, useDocumentTitle, useLocalize } from '~/hooks';
+import { executeUpload, useExecuteTool, useMyRunsForTool } from './api';
 import { cacheRun, getCachedRun } from './runParamsCache';
-import { useExecuteTool, useMyRunsForTool } from './api';
 import { useMergedTools } from './toolhostHooks';
 import PluginRunner from './PluginRunner';
 import LocalRunner from './LocalRunner';
 import SchemaForm from './SchemaForm';
 import ResultView from './ResultView';
 import WebRunner from './WebRunner';
+import MapPanel from './MapPanel';
 import { cn } from '~/utils';
 
 /** TerraVox Toolbox: manifest-driven tool runner (/toolbox). The sidebar's
@@ -43,6 +44,7 @@ export default function Toolbox() {
       : `${localize('com_toolbox_nav')} · ${user?.username ?? 'TerraVox'}`,
   );
 
+  const isMapPanel = searchParams.get('panel') === 'map';
   const selectedIsLocal = selected != null && isLocallyManagedTool(selected.manifest);
   /* Offline hint is only actionable for locally managed tools (desktop/plugin) —
    * server/web users lose nothing when the Toolhost is down. */
@@ -76,19 +78,54 @@ export default function Toolbox() {
         {selected && (
           <code className="text-text-quaternary shrink-0 text-xs">{selected.manifest.tool_id}</code>
         )}
+        <button
+          type="button"
+          className="flex shrink-0 items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt hover:text-text-primary"
+          onClick={() =>
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev);
+              next.set('panel', 'map');
+              return next;
+            })
+          }
+        >
+          <MapIcon className="size-3.5" aria-hidden="true" />
+          {localize('com_toolbox_map_open')}
+        </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-          {showOfflineHint && (
-            <div className="flex items-center gap-2 rounded-lg border border-border-medium bg-surface-tertiary px-3 py-2 text-sm text-text-secondary">
-              <MonitorX className="size-4 shrink-0" aria-hidden="true" />
-              {localize('com_toolbox_toolhost_desktop_offline')}
-            </div>
-          )}
-          <ToolBody selected={selected} />
+      {isMapPanel && (
+        <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+          <button
+            type="button"
+            className="flex w-fit cursor-pointer items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt hover:text-text-primary"
+            onClick={() =>
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete('panel');
+                return next;
+              })
+            }
+          >
+            <X className="size-3.5" aria-hidden="true" />
+            {localize('com_toolbox_map_close')}
+          </button>
+          <MapPanel className="min-h-0 w-full flex-1 rounded-lg border border-border-medium" />
         </div>
-      </div>
+      )}
+      {!isMapPanel && (
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+            {showOfflineHint && (
+              <div className="flex items-center gap-2 rounded-lg border border-border-medium bg-surface-tertiary px-3 py-2 text-sm text-text-secondary">
+                <MonitorX className="size-4 shrink-0" aria-hidden="true" />
+                {localize('com_toolbox_toolhost_desktop_offline')}
+              </div>
+            )}
+            <ToolBody selected={selected} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -137,10 +174,22 @@ function ToolRunner({ manifest }: { manifest: ToolManifest }) {
     setError(null);
     setOutcome(null);
     try {
-      const result = await execute.mutateAsync({
-        params: values,
-        confirmed: manifest.dangerous ? ackDanger || needsConfirm : undefined,
-      });
+      /* upload 控件工具走 multipart 通道（文件内容不进 JSON params）。 */
+      const uploadNames = Object.entries(manifest.form?.fields ?? {})
+        .filter(([, hint]) => hint?.widget === 'upload')
+        .map(([name]) => name);
+      const result = uploadNames.length
+        ? await executeUpload(manifest.tool_id, {
+            file: values[uploadNames[0]] as File,
+            params: Object.fromEntries(
+              Object.entries(values).filter(([name]) => !uploadNames.includes(name)),
+            ),
+            confirmed: manifest.dangerous ? ackDanger || needsConfirm : undefined,
+          })
+        : await execute.mutateAsync({
+            params: values,
+            confirmed: manifest.dangerous ? ackDanger || needsConfirm : undefined,
+          });
       /* Values stay in this browser (audit trail stores key names only). */
       cacheRun(manifest.tool_id, {
         run_id: result.run_id,

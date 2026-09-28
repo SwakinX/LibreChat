@@ -1,7 +1,10 @@
 import { useMemo } from 'react';
+import { FileDown } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
 import MarkdownLite from '~/components/Chat/Messages/Content/MarkdownLite';
+import { downloadProxyFile } from './api';
 import { useLocalize } from '~/hooks';
+import MapPanel from './MapPanel';
 
 type ResultViewProps = { outcome: ExecuteResult; manifest: ToolManifest };
 
@@ -85,6 +88,37 @@ export default function ResultView({ outcome, manifest }: ResultViewProps) {
     return <pre className="whitespace-pre-wrap break-words text-sm text-text-primary">{text}</pre>;
   }
 
+  if (renderer === 'file') {
+    const links = normalizeLinks(result);
+    if (links.length === 0) {
+      return <p className="text-sm text-text-tertiary">{localize('com_toolbox_no_result')}</p>;
+    }
+    return (
+      <ul className="flex flex-col gap-1.5">
+        {links.map((link) => (
+          <li key={`${link.label}-${link.url}`}>
+            <button
+              type="button"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-sm text-text-secondary transition-colors hover:bg-surface-active-alt hover:text-text-primary"
+              onClick={() => void downloadProxyFile(link.url, link.label)}
+            >
+              <FileDown className="size-4" aria-hidden="true" />
+              {localize('com_toolbox_file_download')}
+              {link.label && <code className="text-xs">{link.label}</code>}
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  if (renderer === 'map') {
+    const geojson = extractGeojson(result);
+    return (
+      <MapPanel geojson={geojson} className="h-96 w-full rounded-lg border border-border-medium" />
+    );
+  }
+
   if (renderer === 'link') {
     const links = normalizeLinks(result);
     if (links.length === 0) {
@@ -113,6 +147,20 @@ export default function ResultView({ outcome, manifest }: ResultViewProps) {
       {JSON.stringify(result, null, 2)}
     </pre>
   );
+}
+
+/** map renderer payload: FeatureCollection directly, or {features|rows} wrapped. */
+function extractGeojson(result: unknown): unknown {
+  if (result && typeof result === 'object' && !Array.isArray(result)) {
+    const record = result as Record<string, unknown>;
+    if (Array.isArray(record.features)) {
+      return { ...record, features: record.features };
+    }
+    if (Array.isArray(record.rows)) {
+      return { type: 'FeatureCollection', features: [] };
+    }
+  }
+  return result;
 }
 
 /** link renderer convention (2.11.0): {label,url} or [{label,url}]; bare

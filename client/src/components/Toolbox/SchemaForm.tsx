@@ -191,6 +191,43 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
         />
       );
     }
+    if (field.hint.widget === 'upload') {
+      const picked = value instanceof File ? value : null;
+      return (
+        <div className="flex items-center gap-2">
+          <label className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt">
+            <FolderOpen className="size-4" aria-hidden="true" />
+            {picked
+              ? localize('com_toolbox_widget_change_file')
+              : localize('com_toolbox_widget_pick_file')}
+            <input
+              type="file"
+              className="hidden"
+              disabled={disabled}
+              accept={
+                field.hint.accept
+                  ? field.hint.accept
+                      .map((ext) => (ext.startsWith('.') ? ext : `.${ext}`))
+                      .join(',')
+                  : undefined
+              }
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  set(field.name, file);
+                }
+                e.target.value = '';
+              }}
+            />
+          </label>
+          <span className="min-w-0 truncate text-xs text-text-secondary">
+            {picked
+              ? `${picked.name} (${Math.ceil(picked.size / 1024)} KB)`
+              : localize('com_toolbox_widget_no_file')}
+          </span>
+        </div>
+      );
+    }
     if (field.hint.widget === 'file' || field.hint.widget === 'directory') {
       return (
         <PathPickInput

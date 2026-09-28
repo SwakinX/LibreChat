@@ -1567,5 +1567,13 @@
   "com_toolbox_runs_params": "参数",
   "com_toolbox_runs_params_empty": "无参数",
   "com_toolbox_runs_result": "结果",
-  "com_toolbox_runs_restore": "还原参数"
+  "com_toolbox_runs_restore": "还原参数",
+  "com_toolbox_map_open": "地图",
+  "com_toolbox_map_close": "返回工具列表",
+  "com_toolbox_map_loading": "地图加载中…",
+  "com_toolbox_map_not_configured": "地图服务尚未配置——请管理员在 Gateway 填写 iServer 配置。",
+  "com_toolbox_widget_pick_file": "选择文件…",
+  "com_toolbox_widget_change_file": "更换文件",
+  "com_toolbox_widget_no_file": "未选择文件",
+  "com_toolbox_file_download": "下载"
 }

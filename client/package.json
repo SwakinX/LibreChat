@@ -78,6 +78,7 @@
     "input-otp": "^1.4.2",
     "jotai": "^2.12.5",
     "js-cookie": "^3.0.5",
+    "leaflet": "^1.9.4",
     "librechat-data-provider": "*",
     "lodash": "^4.17.23",
     "lucide": "^0.528.0",
