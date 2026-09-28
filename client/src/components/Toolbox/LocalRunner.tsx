@@ -29,6 +29,7 @@ const STAGE_KEYS: Record<string, TranslationKeys> = {
   downloading: 'com_toolbox_stage_downloading',
   verifying: 'com_toolbox_stage_verifying',
   staging: 'com_toolbox_stage_staging',
+  installing: 'com_toolbox_stage_installing',
 };
 
 /** InstallJobError.code → localized line (raw message shown as a sub-line). */
@@ -41,8 +42,22 @@ const ERROR_KEYS: Record<string, TranslationKeys> = {
   archive_invalid: 'com_toolbox_err_archive_invalid',
   launcher_missing: 'com_toolbox_err_launcher_missing',
   version_conflict: 'com_toolbox_err_version_conflict',
+  host_root_invalid: 'com_toolbox_err_host_root_invalid',
+  install_script_failed: 'com_toolbox_err_install_script_failed',
+  uninstall_script_failed: 'com_toolbox_err_uninstall_script_failed',
   internal: 'com_toolbox_err_internal',
 };
+
+/** JobPanel + badge logic shared with the plugin runner (1.4.0). */
+export function InstallJobPanel({
+  job,
+  version,
+}: {
+  job: InstallJob | null | undefined;
+  version?: string;
+}) {
+  return <JobPanel job={job} version={version} />;
+}
 
 const TERMINAL_RUN_STATES = ['failed', 'timeout', 'stopped'];
 /** Terminal run status → localized headline. */

@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom } from 'jotai';
-import { AlertTriangle, ChevronDown } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ExternalLink } from 'lucide-react';
 import { useMediaQuery, buttonVariants, Spinner } from '@librechat/client';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import type { MergedTool } from './toolStatus';
+import { isLocallyManagedTool, isWebTool } from './toolStatus';
 import useSidebarToggle from '~/hooks/Nav/useSidebarToggle';
 import { useMergedTools } from './toolhostHooks';
 import { groupsExpandedAtom } from './atoms';
-import { isDesktopTool } from './toolStatus';
 import { Collapse } from '~/components/ui';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
@@ -199,7 +199,13 @@ export default function ToolboxSection() {
                               aria-hidden="true"
                             />
                           )}
-                          {isDesktopTool(tool.manifest) && <LocalBadge tool={tool} />}
+                          {isLocallyManagedTool(tool.manifest) && <LocalBadge tool={tool} />}
+                          {isWebTool(tool.manifest) && (
+                            <ExternalLink
+                              className="ml-2 h-3.5 w-3.5 shrink-0 text-text-tertiary"
+                              aria-hidden="true"
+                            />
+                          )}
                         </button>
                       );
                     })}

@@ -85,11 +85,61 @@ export default function ResultView({ outcome, manifest }: ResultViewProps) {
     return <pre className="whitespace-pre-wrap break-words text-sm text-text-primary">{text}</pre>;
   }
 
+  if (renderer === 'link') {
+    const links = normalizeLinks(result);
+    if (links.length === 0) {
+      return <p className="text-sm text-text-tertiary">{localize('com_toolbox_no_result')}</p>;
+    }
+    return (
+      <ul className="flex flex-col gap-1.5">
+        {links.map((link) => (
+          <li key={`${link.label}-${link.url}`}>
+            <a
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-indigo-500 underline decoration-dotted hover:text-indigo-400"
+            >
+              {link.label || link.url}
+            </a>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
   return (
     <pre className="overflow-x-auto rounded-lg border border-border-medium bg-surface-tertiary p-3 text-xs text-text-secondary">
       {JSON.stringify(result, null, 2)}
     </pre>
   );
+}
+
+/** link renderer convention (2.11.0): {label,url} or [{label,url}]; bare
+ * strings render as self-labeled links. */
+function normalizeLinks(result: unknown): { label: string; url: string }[] {
+  const rows = Array.isArray(result) ? result : [result];
+  const links: { label: string; url: string }[] = [];
+  for (const row of rows) {
+    if (typeof row === 'string') {
+      links.push({ label: row, url: row });
+    } else if (row && typeof row === 'object') {
+      const record = row as { label?: unknown; url?: unknown; href?: unknown };
+      let url = '';
+      if (typeof record.url === 'string') {
+        url = record.url;
+      } else if (typeof record.href === 'string') {
+        url = record.href;
+      }
+      if (url) {
+        links.push({
+          label: typeof record.label === 'string' ? record.label : url,
+          url,
+        });
+      }
+    }
+  }
+  return links;
 }
 
 /** Markdown renderer convention: a `content` string on the result object, or a bare string. */

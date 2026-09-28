@@ -178,7 +178,7 @@ export function useDeleteLocalTool() {
   });
 }
 
-const INSTALL_JOB_ACTIVE = ['downloading', 'verifying', 'staging'];
+const INSTALL_JOB_ACTIVE = ['downloading', 'verifying', 'staging', 'installing'];
 
 /** Poll the install job while active; on a terminal state refresh the local
  * tools list so badges flip without waiting for the 30s interval. */

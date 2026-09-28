@@ -27,6 +27,22 @@ export function isDesktopTool(manifest: ToolManifest): boolean {
   return manifest.execution?.kind === 'desktop';
 }
 
+/** Plugin tools (contracts 2.11.0): installed via the Toolhost package
+ * lifecycle (install script + host launch), so they share desktop badges. */
+export function isPluginTool(manifest: ToolManifest): boolean {
+  return manifest.execution?.kind === 'plugin';
+}
+
+/** Web-link tools: "run" = open the URL in a new tab; no local state. */
+export function isWebTool(manifest: ToolManifest): boolean {
+  return manifest.execution?.kind === 'web';
+}
+
+/** Tools whose lifecycle (install/update/remove) lives on the local Toolhost. */
+export function isLocallyManagedTool(manifest: ToolManifest): boolean {
+  return isDesktopTool(manifest) || isPluginTool(manifest);
+}
+
 /** 'v'-stripped numeric tuple compare: 1.10.0 > 1.9.0; non-numeric parts score 0. */
 export function compareVersions(a: string, b: string): number {
   const parse = (version: string): number[] =>
@@ -54,7 +70,7 @@ export function mergeCatalogWithLocal(
   const merged: MergedTool[] = catalog.map((manifest) => {
     const local = byId.get(manifest.tool_id);
     byId.delete(manifest.tool_id);
-    if (!isDesktopTool(manifest)) {
+    if (!isLocallyManagedTool(manifest)) {
       /* server/web tools run through the gateway execute path — no local state */
       return { manifest, status: 'installed' };
     }

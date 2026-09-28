@@ -17,6 +17,16 @@ export const TOOLHOST_BASE = 'http://127.0.0.1:8765';
 export type LocalToolRecord = {
   tool_id: string;
   source: string;
+  /** 1.4.0: 'plugin' for host-plugin packages, 'automation' otherwise. */
+  kind?: string | null;
+  /** Plugin block (1.4.0) — present for host-plugin packages. */
+  plugin?: {
+    host_root?: string;
+    host_launcher?: string;
+    host_root_hints?: string[];
+    install_script?: string;
+    uninstall_script?: string;
+  } | null;
   name?: string | null;
   description?: string | null;
   installed_version?: string | null;
@@ -181,7 +191,13 @@ export type InstallRequestBody = {
     package_sha256?: string;
     launcher?: string;
     runtime?: string;
+    host_launcher?: string;
+    host_root_hints?: string[];
+    install_script?: string;
+    uninstall_script?: string;
   };
+  /** Plugin packages (1.4.0): the user-selected host software root. */
+  plugin?: { host_root: string };
 };
 
 export async function postInstall(

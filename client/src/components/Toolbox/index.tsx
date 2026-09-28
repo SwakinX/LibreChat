@@ -4,14 +4,22 @@ import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, MonitorX, Play, Wrench } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
+import {
+  isDesktopTool,
+  isLocallyManagedTool,
+  isPluginTool,
+  isWebTool,
+  type MergedTool,
+} from './toolStatus';
 import { RunRecordsSection, type RunRecordRow } from './RunRecordsSection';
 import { useAuthContext, useDocumentTitle, useLocalize } from '~/hooks';
-import { isDesktopTool, type MergedTool } from './toolStatus';
 import { useExecuteTool, useMyRunsForTool } from './api';
 import { useMergedTools } from './toolhostHooks';
+import PluginRunner from './PluginRunner';
 import LocalRunner from './LocalRunner';
 import SchemaForm from './SchemaForm';
 import ResultView from './ResultView';
+import WebRunner from './WebRunner';
 import { cn } from '~/utils';
 
 /** TerraVox Toolbox: manifest-driven tool runner (/toolbox). The sidebar's
@@ -34,12 +42,12 @@ export default function Toolbox() {
       : `${localize('com_toolbox_nav')} · ${user?.username ?? 'TerraVox'}`,
   );
 
-  const selectedIsDesktop = selected != null && isDesktopTool(selected.manifest);
-  /* Offline hint is only actionable for desktop tools — server-tool users
-   * lose nothing when the Toolhost is down. */
+  const selectedIsLocal = selected != null && isLocallyManagedTool(selected.manifest);
+  /* Offline hint is only actionable for locally managed tools (desktop/plugin) —
+   * server/web users lose nothing when the Toolhost is down. */
   const showOfflineHint =
     !online &&
-    (selectedIsDesktop || (!selected && tools.some((tool) => isDesktopTool(tool.manifest))));
+    (selectedIsLocal || (!selected && tools.some((tool) => isLocallyManagedTool(tool.manifest))));
 
   return (
     /* No bg class: the content pane inherits the body theme background —
@@ -84,7 +92,9 @@ export default function Toolbox() {
   );
 }
 
-/** Desktop tools run locally via the Toolhost; server tools via the Gateway. */
+/** Tool surfaces by kind (contracts 2.11.0): desktop automation via the
+ * Toolhost package protocol; plugins via install-script + host launch; web
+ * links open in a new tab; everything else executes server-side. */
 function ToolBody({ selected }: { selected: MergedTool | null }) {
   const localize = useLocalize();
   if (!selected) {
@@ -93,6 +103,12 @@ function ToolBody({ selected }: { selected: MergedTool | null }) {
         {localize('com_toolbox_select_hint')}
       </p>
     );
+  }
+  if (isPluginTool(selected.manifest)) {
+    return <PluginRunner key={selected.manifest.tool_id} tool={selected} />;
+  }
+  if (isWebTool(selected.manifest)) {
+    return <WebRunner key={selected.manifest.tool_id} manifest={selected.manifest} />;
   }
   if (isDesktopTool(selected.manifest)) {
     return <LocalRunner key={selected.manifest.tool_id} tool={selected} />;

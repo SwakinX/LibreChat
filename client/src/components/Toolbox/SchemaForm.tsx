@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
 import type { FieldHint, ToolManifest } from './types';
+import type { ChoiceOption } from './api';
+import { useChoicesFrom } from './api';
 import { useLocalize } from '~/hooks';
 
 type SchemaFormProps = {
@@ -19,9 +21,12 @@ type FieldDef = {
 };
 
 /**
- * Minimal JSON-Schema-driven form generator for Tool Manifest parameters.
+ * JSON-Schema-driven form generator for Tool Manifest parameters.
  * Deliberately dependency-free (no rjsf/formily) to keep fork drift low;
- * covers the v1 parameter surface: string/number/boolean + enums.
+ * covers the v1 parameter surface (contracts 2.11.0): string/number/boolean/
+ * enums + multiselect, date, datetime, file, directory, static choices and
+ * dynamic choices_from. file/directory take absolute local paths (no upload —
+ * desktop tools read/write them on the user's machine).
  */
 export default function SchemaForm({ manifest, values, onChange, disabled }: SchemaFormProps) {
   const localize = useLocalize();
@@ -52,6 +57,30 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
   const renderControl = (field: FieldDef, value: unknown) => {
     const commonCls =
       'flex w-full rounded-md border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:border-border-xheavy focus:outline-none disabled:opacity-50';
+    const choices = staticChoices(field);
+
+    /* multiselect: checkbox group over choices/enum (array of strings). */
+    if (
+      field.hint.widget === 'multiselect' ||
+      (field.type === 'array' && (choices || field.enumValues))
+    ) {
+      return (
+        <MultiSelectControl
+          field={field}
+          staticOptions={choices}
+          value={Array.isArray(value) ? (value as unknown[]).map(String) : []}
+          disabled={disabled}
+          commonCls={commonCls}
+          onToggle={(option, checked) => {
+            const current = Array.isArray(value) ? (value as unknown[]).map(String) : [];
+            set(
+              field.name,
+              checked ? [...current, option] : current.filter((item) => item !== option),
+            );
+          }}
+        />
+      );
+    }
     if (field.enumValues) {
       return (
         <select
@@ -76,6 +105,34 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
         </select>
       );
     }
+    if (field.hint.choices_from) {
+      return (
+        <ChoicesControl
+          hint={field.hint}
+          value={String(value ?? '')}
+          disabled={disabled}
+          commonCls={commonCls}
+          onChange={(next) => set(field.name, next)}
+        />
+      );
+    }
+    if (field.hint.choices) {
+      return (
+        <select
+          className={commonCls}
+          disabled={disabled}
+          value={String(value ?? '')}
+          onChange={(e) => set(field.name, e.target.value)}
+        >
+          <option value="">—</option>
+          {field.hint.choices.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+        </select>
+      );
+    }
     if (field.type === 'boolean') {
       return (
         <input
@@ -84,6 +141,28 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
           disabled={disabled}
           checked={Boolean(value)}
           onChange={(e) => set(field.name, e.target.checked)}
+        />
+      );
+    }
+    if (field.hint.widget === 'date') {
+      return (
+        <input
+          type="date"
+          className={commonCls}
+          disabled={disabled}
+          value={String(value ?? '')}
+          onChange={(e) => set(field.name, e.target.value)}
+        />
+      );
+    }
+    if (field.hint.widget === 'datetime') {
+      return (
+        <input
+          type="datetime-local"
+          className={commonCls}
+          disabled={disabled}
+          value={String(value ?? '')}
+          onChange={(e) => set(field.name, e.target.value)}
         />
       );
     }
@@ -107,6 +186,23 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
           placeholder={field.hint.placeholder}
           value={value === '' ? '' : Number(value)}
           onChange={(e) => set(field.name, e.target.value === '' ? '' : Number(e.target.value))}
+        />
+      );
+    }
+    if (field.hint.widget === 'file' || field.hint.widget === 'directory') {
+      return (
+        <input
+          type="text"
+          className={commonCls}
+          disabled={disabled}
+          placeholder={
+            field.hint.placeholder ??
+            (field.hint.widget === 'file'
+              ? localize('com_toolbox_widget_file_placeholder')
+              : localize('com_toolbox_widget_directory_placeholder'))
+          }
+          value={String(value ?? '')}
+          onChange={(e) => set(field.name, e.target.value)}
         />
       );
     }
@@ -144,5 +240,127 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
         <p className="text-sm text-text-tertiary">{localize('com_toolbox_no_params')}</p>
       )}
     </div>
+  );
+}
+
+/** Static options: hint.choices wins, schema enum is the fallback. */
+function staticChoices(field: FieldDef): string[] | undefined {
+  if (field.hint.choices?.length) {
+    return field.hint.choices;
+  }
+  return field.enumValues;
+}
+
+function MultiSelectControl({
+  field,
+  staticOptions,
+  value,
+  disabled,
+  commonCls,
+  onToggle,
+}: {
+  field: FieldDef;
+  staticOptions?: string[];
+  value: string[];
+  disabled?: boolean;
+  commonCls: string;
+  onToggle: (option: string, checked: boolean) => void;
+}) {
+  const localize = useLocalize();
+  const dynamic = useChoicesFrom(field.hint.choices_from);
+  if (dynamic.data) {
+    return (
+      <OptionCheckGroup
+        options={dynamic.data}
+        value={value}
+        disabled={disabled}
+        onToggle={onToggle}
+      />
+    );
+  }
+  if (dynamic.isError) {
+    return <p className="text-text-error text-xs">{localize('com_toolbox_choices_failed')}</p>;
+  }
+  if (staticOptions?.length) {
+    return (
+      <OptionCheckGroup
+        options={staticOptions.map((opt) => ({ value: opt, label: opt }))}
+        value={value}
+        disabled={disabled}
+        onToggle={onToggle}
+      />
+    );
+  }
+  if (dynamic.isLoading) {
+    return <p className={commonCls}>{localize('com_toolbox_choices_loading')}</p>;
+  }
+  return <p className="text-xs text-text-tertiary">{localize('com_toolbox_choices_empty')}</p>;
+}
+
+function OptionCheckGroup({
+  options,
+  value,
+  disabled,
+  onToggle,
+}: {
+  options: ChoiceOption[];
+  value: string[];
+  disabled?: boolean;
+  onToggle: (option: string, checked: boolean) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1.5" role="group">
+      {options.map((option) => (
+        <label key={option.value} className="flex items-center gap-1.5 text-sm text-text-secondary">
+          <input
+            type="checkbox"
+            aria-label={option.label}
+            className="size-4 rounded border-border-medium accent-indigo-500"
+            disabled={disabled}
+            checked={value.includes(option.value)}
+            onChange={(e) => onToggle(option.value, e.target.checked)}
+          />
+          {option.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function ChoicesControl({
+  hint,
+  value,
+  disabled,
+  commonCls,
+  onChange,
+}: {
+  hint: FieldHint;
+  value: string;
+  disabled?: boolean;
+  commonCls: string;
+  onChange: (next: string) => void;
+}) {
+  const localize = useLocalize();
+  const dynamic = useChoicesFrom(hint.choices_from);
+  if (dynamic.isError) {
+    return <p className="text-text-error text-xs">{localize('com_toolbox_choices_failed')}</p>;
+  }
+  if (!dynamic.data) {
+    return <p className={commonCls}>{localize('com_toolbox_choices_loading')}</p>;
+  }
+  return (
+    <select
+      className={commonCls}
+      disabled={disabled}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">—</option>
+      {dynamic.data.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
   );
 }

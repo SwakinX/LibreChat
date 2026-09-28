@@ -42,6 +42,8 @@ export type ToolManifest = {
   execution?: {
     kind: string;
     handler?: string;
+    /** web arm (2.11.0): open in a new tab; no server execution. */
+    url?: string;
     catalog_tool_id?: string;
     /** desktop arm: where the Toolhost pulls the package from. */
     distribution?: {
@@ -51,6 +53,11 @@ export type ToolManifest = {
       package_sha256?: string;
       launcher?: string;
       runtime?: 'self-contained' | 'standard-python' | 'arcpy3';
+      /** plugin arm (2.11.0): host-software launch registration. */
+      host_launcher?: string;
+      host_root_hints?: string[];
+      install_script?: string;
+      uninstall_script?: string;
     };
   };
   result?: {

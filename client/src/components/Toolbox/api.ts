@@ -143,3 +143,56 @@ export const useMyRunsForTool = (toolId: string) =>
     refetchInterval: 30_000,
     retry: false,
   });
+
+export type ChoiceOption = { value: string; label: string };
+
+/** Run a tool with no params and shape its result into select options —
+ * the `choices_from` source contract (2.11.0): result is an array of objects
+ * (or {rows[]}/{items[]} wrapped); value/label fields default to id/name;
+ * non-object rows fall back to their string form. */
+async function fetchChoices(
+  tool: string,
+  valueField?: string,
+  labelField?: string,
+): Promise<ChoiceOption[]> {
+  const result = await post<unknown>(`/api/terravox/tools/${encodeURIComponent(tool)}/execute`, {
+    params: {},
+  });
+  let rows: unknown = (result as { result?: unknown }).result ?? result;
+  if (rows && typeof rows === 'object' && !Array.isArray(rows)) {
+    const wrapped = rows as { rows?: unknown; items?: unknown };
+    rows = wrapped.rows ?? wrapped.items ?? [];
+  }
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  const vKey = valueField || 'id';
+  const lKey = labelField || 'name';
+  return rows
+    .map((row) => {
+      if (row && typeof row === 'object') {
+        const record = row as Record<string, unknown>;
+        const value = record[vKey];
+        const label = record[lKey] ?? value;
+        return {
+          value: value == null ? '' : String(value),
+          label: label == null ? '' : String(label),
+        };
+      }
+      return { value: String(row), label: String(row) };
+    })
+    .filter((option) => option.value !== '');
+}
+
+/** Dynamic select options from another tool (manifest form.fields.*.choices_from).
+ * Source must be callable with empty params and exposed to the ui front. */
+export const useChoicesFrom = (
+  source: { tool: string; value_field?: string; label_field?: string } | undefined,
+) =>
+  useQuery({
+    queryKey: ['terravox', 'choices', source?.tool, source?.value_field, source?.label_field],
+    queryFn: () => fetchChoices(source?.tool as string, source?.value_field, source?.label_field),
+    enabled: !!source?.tool,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
