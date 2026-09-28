@@ -172,6 +172,89 @@ router.delete(
   handler(() => '/api/v1/nextcloud/link', { method: 'DELETE' }),
 );
 
+/* Multipart execute channel (2.15.0): the browser sends FormData; the raw
+ * body streams straight to the gateway with the original content-type so
+ * multer on the gateway side parses it. No JSON body parsing here. */
+router.post('/tools/:toolId/execute-upload', async (req, res) => {
+  const accessToken = await resolveAccessToken(req, res);
+  if (!accessToken) {
+    return res.status(503).json({
+      message: 'Tool Gateway requires an OpenID session token. Log out and back in.',
+    });
+  }
+  try {
+    const upstream = await fetch(
+      `${GATEWAY_URL}/api/v1/tools/${encodeURIComponent(req.params.toolId)}/execute-upload`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': req.headers['content-type'],
+        },
+        body: req,
+        duplex: 'half',
+      },
+    );
+    const payload = await upstream.text();
+    return res
+      .status(upstream.status)
+      .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
+      .send(payload);
+  } catch (error) {
+    const message =
+      error.name === 'AbortError' ? 'Tool Gateway timed out' : 'Tool Gateway unreachable';
+    return res.status(502).json({ message: `${message} (${GATEWAY_URL})` });
+  }
+});
+
+/* File download proxy (2.15.0): stream bytes verbatim — buffering here
+ * would corrupt binary payloads, so this route never uses forwardToGateway. */
+router.get('/files/download', async (req, res) => {
+  const accessToken = await resolveAccessToken(req, res);
+  if (!accessToken) {
+    return res
+      .status(503)
+      .json({ message: 'Tool Gateway requires an OpenID session token. Log out and back in.' });
+  }
+  try {
+    const upstream = await fetch(
+      `${GATEWAY_URL}/api/v1/nextcloud/files/download?path=${encodeURIComponent(String(req.query.path || ''))}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!upstream.ok || !upstream.body) {
+      const payload = await upstream.text();
+      return res
+        .status(upstream.status)
+        .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
+        .send(payload);
+    }
+    res.status(upstream.status);
+    const disposition = upstream.headers.get('content-disposition');
+    if (disposition) {
+      res.set('Content-Disposition', disposition);
+    }
+    res.set('Content-Type', upstream.headers.get('content-type') || 'application/octet-stream');
+    const reader = upstream.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    return res.end();
+  } catch (error) {
+    const message =
+      error.name === 'AbortError' ? 'Tool Gateway timed out' : 'Tool Gateway unreachable';
+    return res.status(502).json({ message: `${message} (${GATEWAY_URL})` });
+  }
+});
+
+/* Map panel config (2.15.0): base tile template served same-origin via the
+ * nginx /iserver/ reverse proxy; nothing sensitive reaches the browser. */
+router.get(
+  '/map/config',
+  handler(() => '/api/v1/map/config'),
+);
+
 /* Direct-run terminal report from the toolbox page (local-tool-plan §8):
  * the browser posts best-effort once a local run finishes; user identity is
  * the forwarded OIDC bearer. */
