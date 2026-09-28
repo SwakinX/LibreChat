@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronDown, RotateCcw } from 'lucide-react';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import { useLocalize } from '~/hooks';
@@ -51,9 +51,13 @@ const RUN_STATUS_DOT: Record<string, string> = {
 export function RunRecordsSection({
   rows,
   localize,
+  renderResult,
 }: {
   rows: RunRecordRow[];
   localize: ReturnType<typeof useLocalize>;
+  /** Render a run's result the same way the main result area does (table/
+   * markdown/... by manifest renderer); falls back to pretty JSON. */
+  renderResult?: (result: unknown) => ReactNode;
 }) {
   return (
     <section className="flex flex-col gap-2" aria-label={localize('com_toolbox_runs_title')}>
@@ -65,7 +69,7 @@ export function RunRecordsSection({
       ) : (
         <ul className="flex flex-col divide-y divide-border-light">
           {rows.map((row) => (
-            <RunRow key={row.key} row={row} localize={localize} />
+            <RunRow key={row.key} row={row} localize={localize} renderResult={renderResult} />
           ))}
         </ul>
       )}
@@ -76,9 +80,11 @@ export function RunRecordsSection({
 function RunRow({
   row,
   localize,
+  renderResult,
 }: {
   row: RunRecordRow;
   localize: ReturnType<typeof useLocalize>;
+  renderResult?: (result: unknown) => ReactNode;
 }) {
   const duration = formatDurationMs(row.duration_ms);
   const [expanded, setExpanded] = useState(false);
@@ -117,7 +123,7 @@ function RunRow({
       </div>
       {expanded && hasDetail && (
         <div className="mt-2 flex flex-col gap-2 rounded-lg border border-border-light bg-surface-tertiary px-3 py-2">
-          <RunDetail row={row} localize={localize} />
+          <RunDetail row={row} localize={localize} renderResult={renderResult} />
         </div>
       )}
     </li>
@@ -127,13 +133,15 @@ function RunRow({
 function RunDetail({
   row,
   localize,
+  renderResult,
 }: {
+  renderResult?: (result: unknown) => ReactNode;
   row: RunRecordRow;
   localize: ReturnType<typeof useLocalize>;
 }) {
   const params = row.params ?? {};
   const paramEntries = Object.entries(params);
-  const resultText = stringifyResult(row.result);
+  const resultText = renderResult ? null : stringifyResult(row.result);
   return (
     <>
       <div>
@@ -151,14 +159,18 @@ function RunDetail({
           </dl>
         )}
       </div>
-      {resultText != null && (
+      {(resultText != null || (renderResult && row.result != null)) && (
         <div>
           <p className="mb-1 font-medium text-text-tertiary">
             {localize('com_toolbox_runs_result')}
           </p>
-          <pre className="max-h-40 overflow-auto rounded border border-border-light bg-surface-primary p-2 font-mono text-[11px] text-text-secondary">
-            {resultText}
-          </pre>
+          {renderResult ? (
+            renderResult(row.result)
+          ) : (
+            <pre className="max-h-40 overflow-auto rounded border border-border-light bg-surface-primary p-2 font-mono text-[11px] text-text-secondary">
+              {resultText}
+            </pre>
+          )}
         </div>
       )}
       {row.onRestore && paramEntries.length > 0 && (

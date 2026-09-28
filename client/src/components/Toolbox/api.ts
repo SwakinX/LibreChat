@@ -138,7 +138,7 @@ export const useMyRunsForTool = (toolId: string) =>
   useQuery({
     queryKey: ['terravox', 'myruns', toolId],
     queryFn: () =>
-      get<MyRunList>(`/api/terravox/runs?tool_id=${encodeURIComponent(toolId)}&limit=20`),
+      get<MyRunList>(`/api/terravox/runs?tool_id=${encodeURIComponent(toolId)}&limit=200`),
     staleTime: 30_000,
     refetchInterval: 30_000,
     retry: false,

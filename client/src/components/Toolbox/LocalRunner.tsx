@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button, Spinner } from '@librechat/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CircleSlash, Loader2, Play, Square, Trash2, Wrench } from 'lucide-react';
@@ -459,11 +459,18 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
 
       <RunRecords
         toolId={manifest.tool_id}
-        onRestoreRun={(params) => {
-          setValues(params);
-          setRunError(null);
-          setOutcome(null);
-        }}
+        onRestoreRun={setValues}
+        renderResult={(result) => (
+          <ResultView
+            outcome={{
+              run_id: '',
+              tool_id: manifest.tool_id,
+              renderer: effectiveManifest.result?.renderer ?? 'json',
+              result,
+            }}
+            manifest={effectiveManifest}
+          />
+        )}
       />
     </div>
   );
@@ -475,13 +482,16 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
 function RunRecords({
   toolId,
   onRestoreRun,
+  renderResult,
 }: {
   toolId: string;
   onRestoreRun: (params: Record<string, unknown>) => void;
+  renderResult?: (result: unknown) => ReactNode;
 }) {
   const localize = useLocalize();
   const health = useToolhostHealth();
   const query = useRunsForTool(toolId, health.data === true);
+  /* Backend keeps its full retention; only the DISPLAY is capped at 20. */
   const rows: RunRecordRow[] = (query.data?.runs ?? []).slice(0, 20).map((run) => ({
     key: run.run_id,
     status: run.status,
@@ -491,7 +501,7 @@ function RunRecords({
     result: run.result,
     onRestore: run.arguments ? onRestoreRun : undefined,
   }));
-  return <RunRecordsSection rows={rows} localize={localize} />;
+  return <RunRecordsSection rows={rows} localize={localize} renderResult={renderResult} />;
 }
 
 function localDurationMs(run: LocalRun): number | null {

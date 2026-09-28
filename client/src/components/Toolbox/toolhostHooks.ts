@@ -239,7 +239,7 @@ export function useRunLogs(runId: string | null, open: boolean) {
 export function useRunsForTool(toolId: string | null | undefined, enabled: boolean) {
   return useQuery({
     queryKey: ['toolhost', 'runs', toolId],
-    queryFn: () => fetchRuns({ toolId: toolId as string, limit: 20 }),
+    queryFn: () => fetchRuns({ toolId: toolId as string, limit: 200 }),
     enabled: enabled && !!toolId,
     refetchInterval: RUNS_HISTORY_POLL_MS,
     retry: false,

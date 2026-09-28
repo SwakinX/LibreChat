@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Button } from '@librechat/client';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -236,11 +236,18 @@ function ToolRunner({ manifest }: { manifest: ToolManifest }) {
 
       <MyRunRecords
         toolId={manifest.tool_id}
-        onRestoreRun={(params) => {
-          setValues(params);
-          setOutcome(null);
-          setError(null);
-        }}
+        onRestoreRun={setValues}
+        renderResult={(result) => (
+          <ResultView
+            outcome={{
+              run_id: '',
+              tool_id: manifest.tool_id,
+              renderer: manifest.result?.renderer ?? 'json',
+              result,
+            }}
+            manifest={manifest}
+          />
+        )}
       />
     </div>
   );
@@ -253,13 +260,16 @@ function ToolRunner({ manifest }: { manifest: ToolManifest }) {
 export function MyRunRecords({
   toolId,
   onRestoreRun,
+  renderResult,
 }: {
   toolId: string;
   onRestoreRun: (params: Record<string, unknown>) => void;
+  renderResult?: (result: unknown) => ReactNode;
 }) {
   const localize = useLocalize();
   const query = useMyRunsForTool(toolId);
-  const rows: RunRecordRow[] = (query.data?.runs ?? []).map((run) => {
+  /* Backend keeps everything; only the DISPLAY is capped at 20. */
+  const rows: RunRecordRow[] = (query.data?.runs ?? []).slice(0, 20).map((run) => {
     const cached = getCachedRun(toolId, run.id);
     return {
       key: run.id,
@@ -271,5 +281,5 @@ export function MyRunRecords({
       onRestore: cached ? onRestoreRun : undefined,
     };
   });
-  return <RunRecordsSection rows={rows} localize={localize} />;
+  return <RunRecordsSection rows={rows} localize={localize} renderResult={renderResult} />;
 }
