@@ -3034,5 +3034,8 @@
   "com_toolbox_run_timeout": "Run timed out",
   "com_toolbox_run_stopped": "Run stopped",
   "com_toolbox_show_logs": "Show logs",
-  "com_toolbox_hide_logs": "Hide logs"
+  "com_toolbox_hide_logs": "Hide logs",
+  "com_toolbox_pair_auto": "Pairing with the desktop app…",
+  "com_toolbox_pair_auto_failed": "Auto-pairing failed",
+  "com_toolbox_pair_retry": "Retry"
 }

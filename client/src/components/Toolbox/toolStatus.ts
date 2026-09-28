@@ -15,8 +15,8 @@ export type MergedTool = {
   manifest: ToolManifest;
   local?: LocalToolRecord;
   status: LocalToolStatus;
-  /** Latest stable version from the gateway package block; absent when Gitea
-   * is unreachable (badge then shows plain "installed"). */
+  /** Admin-approved version from the catalog manifest (contracts 2.8.0:
+   * unapproved repo releases are invisible to the frontend). */
   latestVersion?: string;
 };
 
@@ -58,10 +58,10 @@ export function mergeCatalogWithLocal(
     if (!local) {
       return { manifest, status: 'not_installed' };
     }
-    const latestVersion = manifest.package?.version;
-    const outdated =
-      latestVersion !== undefined &&
-      compareVersions(latestVersion, local.installed_version ?? '') > 0;
+    /* Catalog manifest version is the admin-approved latest (2.8.0 governance):
+     * repo releases ahead of it stay hidden until an admin confirms them. */
+    const latestVersion = manifest.version;
+    const outdated = compareVersions(latestVersion, local.installed_version ?? '') > 0;
     return {
       manifest,
       local,

@@ -4,7 +4,7 @@
  * is probed, not assumed, and a dead port must surface as offline instantly.
  */
 
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InstallJob, InstallRequestBody, LocalToolRecord } from './toolhost';
@@ -13,6 +13,7 @@ import {
   fetchHealth,
   fetchInstallJob,
   fetchLocalTools,
+  fetchPairingCode,
   fetchRun,
   fetchRunLogs,
   postInstall,
@@ -34,12 +35,60 @@ export function usePairingCode() {
   const setCode = useSetAtom(pairingCodeAtom);
   const setRejected = useSetAtom(pairingRejectedAtom);
   const code = useAtomValue(pairingCodeAtom);
-  return {
-    code,
-    saveCode(value: string) {
+  const saveCode = useCallback(
+    (value: string) => {
       setCode(value.trim());
       setRejected(false);
     },
+    [setCode, setRejected],
+  );
+  return { code, saveCode };
+}
+
+/** Auto-pairing: while the Toolhost is online and no code is stored, fetch the
+ * pairing code from the token-free bootstrap endpoint (origin-restricted on
+ * the Toolhost side). Rotation re-runs it: a 403 clears the code, `enabled`
+ * flips true again, and the fresh code is picked up automatically. Failures
+ * surface the reason next to the manual paste fallback. */
+export function useAutoPairing(enabled: boolean) {
+  const { code, saveCode } = usePairingCode();
+  const [phase, setPhase] = useState<'pairing' | 'failed' | 'idle'>('idle');
+  const [reason, setReason] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!enabled || code) {
+      return;
+    }
+    let cancelled = false;
+    setPhase('pairing');
+    setReason(null);
+    fetchPairingCode()
+      .then((value) => {
+        if (!cancelled && value) {
+          saveCode(value);
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setPhase('failed');
+        setReason(
+          error instanceof ToolhostError
+            ? error.message
+            : String((error as Error)?.message ?? error),
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, code, attempt, saveCode]);
+
+  return {
+    phase: code ? ('paired' as const) : phase,
+    reason,
+    retry: () => setAttempt((value) => value + 1),
   };
 }
 

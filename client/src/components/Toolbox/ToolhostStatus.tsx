@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAtomValue } from 'jotai';
-import { KeyRound, MonitorCheck, MonitorX } from 'lucide-react';
-import { usePairingCode, useToolhostHealth } from './toolhostHooks';
+import { KeyRound, Loader2, MonitorCheck, MonitorX } from 'lucide-react';
+import { useAutoPairing, usePairingCode, useToolhostHealth } from './toolhostHooks';
 import { pairingRejectedAtom } from './atoms';
 import { useLocalize } from '~/hooks';
 
@@ -13,12 +13,14 @@ const chipClass =
   'flex items-center gap-2 rounded-full border border-border-medium bg-surface-tertiary px-3 py-1.5 text-xs text-text-secondary';
 
 /** Header chip next to the cloud-drive connect: Toolhost probe + one-time
- * pairing code entry. Offline (gray) / online unpaired (input) / paired. */
+ * pairing. Auto-pairing fetches the code from the Toolhost bootstrap endpoint;
+ * the manual paste box remains the fallback when that fails (reason shown). */
 export default function ToolhostStatus() {
   const localize = useLocalize();
   const health = useToolhostHealth();
   const rejected = useAtomValue(pairingRejectedAtom);
   const { code, saveCode } = usePairingCode();
+  const auto = useAutoPairing(health.data === true);
   const [draft, setDraft] = useState('');
   const [tooShort, setTooShort] = useState(false);
 
@@ -37,6 +39,14 @@ export default function ToolhostStatus() {
   }
 
   if (!code) {
+    if (auto.phase === 'pairing') {
+      return (
+        <div className={chipClass} title={localize('com_toolbox_pair_auto')}>
+          <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+          <span>{localize('com_toolbox_pair_auto')}</span>
+        </div>
+      );
+    }
     return (
       <form
         className={chipClass}
@@ -70,6 +80,21 @@ export default function ToolhostStatus() {
         >
           {localize('com_toolbox_toolhost_pair_save')}
         </button>
+        {auto.phase === 'failed' && (
+          <span className="text-text-error shrink-0" role="alert" title={auto.reason ?? undefined}>
+            {localize('com_toolbox_pair_auto_failed')}
+            {auto.reason ? `: ${auto.reason}` : ''}
+          </span>
+        )}
+        {auto.phase === 'failed' && (
+          <button
+            type="button"
+            className="shrink-0 font-medium text-text-primary underline decoration-dotted"
+            onClick={auto.retry}
+          >
+            {localize('com_toolbox_pair_retry')}
+          </button>
+        )}
         {(rejected || tooShort) && (
           <span className="text-text-error shrink-0" role="alert">
             {rejected

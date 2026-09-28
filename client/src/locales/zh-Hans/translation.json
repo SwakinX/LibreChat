@@ -1516,5 +1516,8 @@
   "com_toolbox_run_timeout": "运行超时",
   "com_toolbox_run_stopped": "运行已停止",
   "com_toolbox_show_logs": "查看日志",
-  "com_toolbox_hide_logs": "收起日志"
+  "com_toolbox_hide_logs": "收起日志",
+  "com_toolbox_pair_auto": "正在与桌面端自动配对…",
+  "com_toolbox_pair_auto_failed": "自动配对失败",
+  "com_toolbox_pair_retry": "重试"
 }

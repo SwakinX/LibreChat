@@ -16,10 +16,10 @@ const serverTool: ToolManifest = {
   execution: { kind: 'server', handler: 'echo' },
 };
 
-const desktopTool = (tool_id: string, packageVersion?: string): ToolManifest => ({
+const desktopTool = (tool_id: string, version = '1.0.0'): ToolManifest => ({
   schema_version: 1,
   tool_id,
-  version: '1.0.0',
+  version,
   display_name: 'Demo',
   description: '',
   execution: {
@@ -28,9 +28,6 @@ const desktopTool = (tool_id: string, packageVersion?: string): ToolManifest => 
       source: { type: 'gitea_release', owner: 'wangjianbo', repo: 'toolsdemo' },
     },
   },
-  ...(packageVersion
-    ? { package: { version: packageVersion, size: 100, updated_at: '2026-09-25T10:00:00Z' } }
-    : {}),
 });
 
 const record = (tool_id: string, installed_version: string): LocalToolRecord => ({
@@ -77,17 +74,14 @@ describe('mergeCatalogWithLocal', () => {
     expect(merged[0].local).toBeUndefined();
   });
 
-  it('equal versions (or no package block) are installed', () => {
+  it('equal versions are installed', () => {
     expect(
       mergeCatalogWithLocal([desktopTool('demo.pkg', '1.0.0')], [record('demo.pkg', '1.0.0')])[0]
         .status,
     ).toBe('installed');
-    expect(
-      mergeCatalogWithLocal([desktopTool('demo.pkg')], [record('demo.pkg', '1.0.0')])[0].status,
-    ).toBe('installed');
   });
 
-  it('newer package block marks update_available with latestVersion', () => {
+  it('newer admin-approved manifest version marks update_available (2.8.0 governance)', () => {
     const merged = mergeCatalogWithLocal(
       [desktopTool('demo.pkg', '1.1.0')],
       [record('demo.pkg', '1.0.0')],

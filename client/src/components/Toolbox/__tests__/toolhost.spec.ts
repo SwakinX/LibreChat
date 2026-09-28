@@ -6,6 +6,7 @@ import {
   fetchHealth,
   fetchInstallJob,
   fetchLocalTools,
+  fetchPairingCode,
   postInstall,
   postRun,
   TOOLHOST_BASE,
@@ -53,6 +54,14 @@ describe('toolhost fetch client', () => {
     await deleteLocalTool('demo.tool', ''); // call 2
     const bare = fetchMock.mock.calls[2][1]?.headers as Record<string, string> | undefined;
     expect(bare?.['X-Approval-Token']).toBeUndefined();
+  });
+
+  it('auto-pairing bootstrap is token-free and unwraps {code}', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ code: 'auto-pairing-code-0123456789' }));
+    await expect(fetchPairingCode()).resolves.toBe('auto-pairing-code-0123456789');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${TOOLHOST_BASE}/v1/local/pairing-code`);
+    expect(init?.headers).toBeUndefined();
   });
 
   it('sends the install body with no stray fields', async () => {

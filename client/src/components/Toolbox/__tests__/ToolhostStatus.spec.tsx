@@ -9,10 +9,16 @@ import { pairingCodeAtom, pairingRejectedAtom } from '../atoms';
 import ToolhostStatus from '../ToolhostStatus';
 
 let mockOnline: boolean | undefined;
+let mockAuto: {
+  phase: 'idle' | 'pairing' | 'failed' | 'paired';
+  reason: string | null;
+  retry: () => void;
+};
 
 jest.mock('../toolhostHooks', () => ({
   ...jest.requireActual('../toolhostHooks'),
   useToolhostHealth: () => ({ data: mockOnline }),
+  useAutoPairing: () => mockAuto,
 }));
 
 jest.mock('~/hooks', () => ({
@@ -33,6 +39,7 @@ const renderChip = () => {
 describe('ToolhostStatus chip', () => {
   beforeEach(() => {
     mockOnline = undefined;
+    mockAuto = { phase: 'idle', reason: null, retry: jest.fn() };
   });
 
   it('renders nothing while the probe is pending', () => {
@@ -71,5 +78,31 @@ describe('ToolhostStatus chip', () => {
       store.set(pairingRejectedAtom, true);
     });
     expect(screen.getByText('com_toolbox_toolhost_pair_rejected')).toBeInTheDocument();
+  });
+
+  it('auto-pairing in progress shows the spinner chip (no input yet)', () => {
+    mockOnline = true;
+    mockAuto = { phase: 'pairing', reason: null, retry: jest.fn() };
+    renderChip();
+    expect(screen.getByText('com_toolbox_pair_auto')).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('com_toolbox_toolhost_pair_prompt'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('auto-pairing failure shows the reason and a retry button beside the manual fallback', () => {
+    mockOnline = true;
+    const retry = jest.fn();
+    mockAuto = { phase: 'failed', reason: 'origin is not allowed', retry };
+    renderChip();
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('com_toolbox_pair_auto_failed');
+    expect(alert).toHaveTextContent('origin is not allowed');
+    /* manual paste remains available as the fallback */
+    expect(screen.getByPlaceholderText('com_toolbox_toolhost_pair_prompt')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'com_toolbox_pair_retry' }));
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 });

@@ -153,6 +153,15 @@ export async function fetchHealth(): Promise<{ status: string }> {
   return parse(await toolhostFetch('/healthz', { timeoutMs: 2000 }));
 }
 
+/** Auto-pairing bootstrap (toolhost-local/v1 1.2.0): token-free on purpose —
+ * this endpoint exists to hand the credential to the whitelisted origin. */
+export async function fetchPairingCode(): Promise<string> {
+  const payload = await parse<{ code: string }>(
+    await toolhostFetch('/v1/local/pairing-code', { timeoutMs: 5000 }),
+  );
+  return payload.code;
+}
+
 export async function fetchLocalTools(): Promise<{ tools: LocalToolRecord[] }> {
   return parse(await toolhostFetch('/v1/local/tools'));
 }
