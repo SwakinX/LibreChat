@@ -457,23 +457,39 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
         </section>
       )}
 
-      <RunRecords toolId={manifest.tool_id} />
+      <RunRecords
+        toolId={manifest.tool_id}
+        onRestoreRun={(params) => {
+          setValues(params);
+          setRunError(null);
+          setOutcome(null);
+        }}
+      />
     </div>
   );
 }
 
-/** Tool-page bottom section: run count + compact newest-first rows from the
- * Toolhost. Presentational shell is shared with server tools
- * (RunRecordsSection); this wrapper only maps the local-run shape. */
-function RunRecords({ toolId }: { toolId: string }) {
+/** Tool-page bottom section: the 20 most recent runs from the Toolhost (which
+ * carries each run's arguments/result). Presentational shell is shared with
+ * server tools (RunRecordsSection); Restore feeds the args back into the form. */
+function RunRecords({
+  toolId,
+  onRestoreRun,
+}: {
+  toolId: string;
+  onRestoreRun: (params: Record<string, unknown>) => void;
+}) {
   const localize = useLocalize();
   const health = useToolhostHealth();
   const query = useRunsForTool(toolId, health.data === true);
-  const rows: RunRecordRow[] = (query.data?.runs ?? []).map((run) => ({
+  const rows: RunRecordRow[] = (query.data?.runs ?? []).slice(0, 20).map((run) => ({
     key: run.run_id,
     status: run.status,
     created_at: run.created_at ?? '',
     duration_ms: localDurationMs(run),
+    params: run.arguments ?? null,
+    result: run.result,
+    onRestore: run.arguments ? onRestoreRun : undefined,
   }));
   return <RunRecordsSection rows={rows} localize={localize} />;
 }

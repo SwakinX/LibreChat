@@ -54,10 +54,10 @@ describe('MyRunRecords (server tools)', () => {
       ],
       total: 2,
     };
-    render(<MyRunRecords toolId="demo.table" />);
+    render(<MyRunRecords toolId="demo.table" onRestoreRun={jest.fn()} />);
 
     expect(screen.getByRole('region', { name: 'com_toolbox_runs_title' })).toBeInTheDocument();
-    expect(screen.getByText('com_toolbox_runs_section:2,200')).toBeInTheDocument();
+    expect(screen.getByText('com_toolbox_runs_section:2,20')).toBeInTheDocument();
     expect(screen.getByText('com_toolbox_runs_status_failed')).toBeInTheDocument();
     expect(screen.getByText('com_toolbox_runs_status_succeeded')).toBeInTheDocument();
     expect(screen.getByText('8.5s')).toBeInTheDocument();
@@ -67,9 +67,9 @@ describe('MyRunRecords (server tools)', () => {
   });
 
   it('shows the empty state while there is no data', () => {
-    render(<MyRunRecords toolId="demo.table" />);
+    render(<MyRunRecords toolId="demo.table" onRestoreRun={jest.fn()} />);
     expect(screen.getByText('com_toolbox_runs_empty')).toBeInTheDocument();
-    expect(screen.getByText('com_toolbox_runs_section:0,200')).toBeInTheDocument();
+    expect(screen.getByText('com_toolbox_runs_section:0,20')).toBeInTheDocument();
   });
 
   it('omits the duration cell when the report has none', () => {
@@ -77,7 +77,7 @@ describe('MyRunRecords (server tools)', () => {
       runs: [baseRun({ duration_ms: null })],
       total: 1,
     };
-    render(<MyRunRecords toolId="demo.table" />);
+    render(<MyRunRecords toolId="demo.table" onRestoreRun={jest.fn()} />);
     expect(screen.getByText('com_toolbox_runs_status_succeeded')).toBeInTheDocument();
     expect(screen.queryByText(/s$/)).not.toBeInTheDocument();
   });

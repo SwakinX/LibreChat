@@ -3080,5 +3080,10 @@
   "com_toolbox_no_result": "No result",
   "com_toolbox_widget_browse": "Browse…",
   "com_toolbox_widget_picking": "Picking…",
-  "com_toolbox_widget_open_calendar": "Open calendar"
+  "com_toolbox_widget_open_calendar": "Open calendar",
+  "com_toolbox_runs_toggle_detail": "Toggle run details",
+  "com_toolbox_runs_params": "Parameters",
+  "com_toolbox_runs_params_empty": "No parameters",
+  "com_toolbox_runs_result": "Result",
+  "com_toolbox_runs_restore": "Restore parameters"
 }

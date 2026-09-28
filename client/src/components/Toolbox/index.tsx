@@ -13,6 +13,7 @@ import {
 } from './toolStatus';
 import { RunRecordsSection, type RunRecordRow } from './RunRecordsSection';
 import { useAuthContext, useDocumentTitle, useLocalize } from '~/hooks';
+import { cacheRun, getCachedRun } from './runParamsCache';
 import { useExecuteTool, useMyRunsForTool } from './api';
 import { useMergedTools } from './toolhostHooks';
 import PluginRunner from './PluginRunner';
@@ -140,6 +141,13 @@ function ToolRunner({ manifest }: { manifest: ToolManifest }) {
         params: values,
         confirmed: manifest.dangerous ? ackDanger || needsConfirm : undefined,
       });
+      /* Values stay in this browser (audit trail stores key names only). */
+      cacheRun(manifest.tool_id, {
+        run_id: result.run_id,
+        params: values,
+        result: result.result,
+        ts: Date.now(),
+      });
       setOutcome(result);
       refreshMyRuns();
     } catch (err) {
@@ -226,22 +234,42 @@ function ToolRunner({ manifest }: { manifest: ToolManifest }) {
         </section>
       )}
 
-      <MyRunRecords toolId={manifest.tool_id} />
+      <MyRunRecords
+        toolId={manifest.tool_id}
+        onRestoreRun={(params) => {
+          setValues(params);
+          setOutcome(null);
+          setError(null);
+        }}
+      />
     </div>
   );
 }
 
 /** Server-tool twin of LocalRunner's run-history section: rows come from the
- * gateway's usage records (own rows only) instead of the local Toolhost —
- * same presentational shell (contracts 2.10.0). */
-export function MyRunRecords({ toolId }: { toolId: string }) {
+ * gateway's usage records (own rows only); the params/result join comes from
+ * this browser's cache (the gateway stores key names only). Restore feeds the
+ * cached params back into the form. */
+export function MyRunRecords({
+  toolId,
+  onRestoreRun,
+}: {
+  toolId: string;
+  onRestoreRun: (params: Record<string, unknown>) => void;
+}) {
   const localize = useLocalize();
   const query = useMyRunsForTool(toolId);
-  const rows: RunRecordRow[] = (query.data?.runs ?? []).map((run) => ({
-    key: run.id,
-    status: run.status,
-    created_at: run.created_at ?? '',
-    duration_ms: run.duration_ms ?? null,
-  }));
+  const rows: RunRecordRow[] = (query.data?.runs ?? []).map((run) => {
+    const cached = getCachedRun(toolId, run.id);
+    return {
+      key: run.id,
+      status: run.status,
+      created_at: run.created_at ?? '',
+      duration_ms: run.duration_ms ?? null,
+      params: cached?.params ?? null,
+      result: cached?.result,
+      onRestore: cached ? onRestoreRun : undefined,
+    };
+  });
   return <RunRecordsSection rows={rows} localize={localize} />;
 }

@@ -1562,5 +1562,10 @@
   "com_toolbox_no_result": "无结果",
   "com_toolbox_widget_browse": "浏览…",
   "com_toolbox_widget_picking": "选择中…",
-  "com_toolbox_widget_open_calendar": "打开日历"
+  "com_toolbox_widget_open_calendar": "打开日历",
+  "com_toolbox_runs_toggle_detail": "展开/收起运行详情",
+  "com_toolbox_runs_params": "参数",
+  "com_toolbox_runs_params_empty": "无参数",
+  "com_toolbox_runs_result": "结果",
+  "com_toolbox_runs_restore": "还原参数"
 }

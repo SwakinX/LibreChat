@@ -304,7 +304,7 @@ describe('LocalRunner', () => {
     render(<LocalRunner tool={tool({ status: 'installed', local: local('1.0.0') })} />);
 
     expect(screen.getByRole('region', { name: 'com_toolbox_runs_title' })).toBeInTheDocument();
-    expect(screen.getByText('com_toolbox_runs_section:2,200')).toBeInTheDocument();
+    expect(screen.getByText('com_toolbox_runs_section:2,20')).toBeInTheDocument();
     /* status is dot + label (never color alone) */
     expect(screen.getByText('com_toolbox_runs_status_succeeded')).toBeInTheDocument();
     expect(screen.getByText('com_toolbox_runs_status_failed')).toBeInTheDocument();
