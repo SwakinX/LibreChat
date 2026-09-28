@@ -17,6 +17,9 @@ export type FieldHint = {
     | 'directory'
     | 'hidden';
   choices?: string[];
+  /** Extension filter for the file widget (2.13.0): leading-dot entries
+   * like ['.gdb', '.shp'] — the native dialog shows matching files only. */
+  accept?: string[];
   choices_from?: { tool: string; value_field?: string; label_field?: string };
 };
 

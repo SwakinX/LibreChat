@@ -168,11 +168,12 @@ const jsonHeaders = (pairingCode: string): Record<string, string> => ({
 export async function pickLocalPath(
   mode: 'file' | 'directory',
   title?: string,
+  accept?: string[],
 ): Promise<string | null> {
   const response = await toolhostFetch('/v1/local/fs/pick', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode, title }),
+    body: JSON.stringify({ mode, title, accept }),
     timeoutMs: 10 * 60_000, // dialog stays open as long as the user needs
   });
   const payload = (await parse<{ path: string | null }>(response)) ?? { path: null };

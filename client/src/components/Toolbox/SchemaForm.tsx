@@ -195,6 +195,7 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
       return (
         <PathPickInput
           mode={field.hint.widget === 'file' ? 'file' : 'directory'}
+          accept={field.hint.accept}
           disabled={disabled}
           placeholder={
             field.hint.placeholder ??
@@ -426,6 +427,7 @@ function PickerInput({
  * dialog via the local Toolhost (browsers never expose local paths). */
 function PathPickInput({
   mode,
+  accept,
   disabled,
   placeholder,
   browseLabel,
@@ -434,6 +436,8 @@ function PathPickInput({
   onChange,
 }: {
   mode: 'file' | 'directory';
+  /** Extension filter (2.13.0), forwarded to the native dialog. */
+  accept?: string[];
   disabled?: boolean;
   placeholder?: string;
   browseLabel: string;
@@ -446,7 +450,7 @@ function PathPickInput({
   const browse = async () => {
     setPicking(true);
     try {
-      const path = await pickLocalPath(mode, dialogTitle);
+      const path = await pickLocalPath(mode, dialogTitle, accept);
       if (path) {
         onChange(path);
       }
