@@ -181,6 +181,24 @@ router.post(
   handler(() => '/api/v1/runs/report', { method: 'POST', body: (req) => req.body }),
 );
 
+/* User's own usage records (contracts 2.10.0): the data source for the
+ * server-tool run-history section on the toolbox page. Forwards the user's
+ * OIDC bearer; the gateway filters by user_sub, so rows are always own-only. */
+router.get(
+  '/runs',
+  handler((req) => {
+    const params = new URLSearchParams();
+    for (const key of ['tool_id', 'limit']) {
+      const value = req.query[key];
+      if (value !== undefined && value !== '') {
+        params.set(key, String(value));
+      }
+    }
+    const query = params.toString();
+    return `/api/v1/runs${query ? `?${query}` : ''}`;
+  }),
+);
+
 /* Admin surface for the admin panel: tool/group CRUD, batch import, handler
  * list. All calls arrive server-side from the admin panel (Bearer JWT, no
  * browser session cookie), so they always forward with the service token plus
