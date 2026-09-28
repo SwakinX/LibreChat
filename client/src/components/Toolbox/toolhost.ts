@@ -162,6 +162,23 @@ const jsonHeaders = (pairingCode: string): Record<string, string> => ({
   ...approvalHeaders(pairingCode),
 });
 
+/** Native file/directory dialog on the Toolhost machine (toolhost-local
+ * 1.5.0): browsers never see local paths, so path widgets ask the local
+ * service to open the real Windows dialog. Returns null on cancel. */
+export async function pickLocalPath(
+  mode: 'file' | 'directory',
+  title?: string,
+): Promise<string | null> {
+  const response = await toolhostFetch('/v1/local/fs/pick', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, title }),
+    timeoutMs: 10 * 60_000, // dialog stays open as long as the user needs
+  });
+  const payload = (await parse<{ path: string | null }>(response)) ?? { path: null };
+  return payload.path;
+}
+
 export async function fetchHealth(): Promise<{ status: string }> {
   return parse(await toolhostFetch('/healthz', { timeoutMs: 2000 }));
 }

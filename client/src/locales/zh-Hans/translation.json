@@ -1559,5 +1559,8 @@
   "com_toolbox_plugin_upgrade": "升级到 {{version}}",
   "com_toolbox_plugin_uninstall": "卸载",
   "com_toolbox_plugin_launch_failed": "宿主启动失败",
-  "com_toolbox_no_result": "无结果"
+  "com_toolbox_no_result": "无结果",
+  "com_toolbox_widget_browse": "浏览…",
+  "com_toolbox_widget_picking": "选择中…",
+  "com_toolbox_widget_open_calendar": "打开日历"
 }

@@ -1,6 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { Calendar, FolderOpen } from 'lucide-react';
 import type { FieldHint, ToolManifest } from './types';
 import type { ChoiceOption } from './api';
+import { pickLocalPath } from './toolhost';
 import { useChoicesFrom } from './api';
 import { useLocalize } from '~/hooks';
 
@@ -146,23 +148,25 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
     }
     if (field.hint.widget === 'date') {
       return (
-        <input
-          type="date"
+        <PickerInput
+          inputType="date"
           className={commonCls}
           disabled={disabled}
           value={String(value ?? '')}
-          onChange={(e) => set(field.name, e.target.value)}
+          iconLabel={localize('com_toolbox_widget_open_calendar')}
+          onChange={(next) => set(field.name, next)}
         />
       );
     }
     if (field.hint.widget === 'datetime') {
       return (
-        <input
-          type="datetime-local"
+        <PickerInput
+          inputType="datetime-local"
           className={commonCls}
           disabled={disabled}
           value={String(value ?? '')}
-          onChange={(e) => set(field.name, e.target.value)}
+          iconLabel={localize('com_toolbox_widget_open_calendar')}
+          onChange={(next) => set(field.name, next)}
         />
       );
     }
@@ -191,9 +195,9 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
     }
     if (field.hint.widget === 'file' || field.hint.widget === 'directory') {
       return (
-        <input
-          type="text"
-          className={commonCls}
+        <PathPickInput
+          mode={field.hint.widget === 'file' ? 'file' : 'directory'}
+          commonCls={commonCls}
           disabled={disabled}
           placeholder={
             field.hint.placeholder ??
@@ -201,8 +205,10 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
               ? localize('com_toolbox_widget_file_placeholder')
               : localize('com_toolbox_widget_directory_placeholder'))
           }
+          browseLabel={localize('com_toolbox_widget_browse')}
           value={String(value ?? '')}
-          onChange={(e) => set(field.name, e.target.value)}
+          dialogTitle={field.hint.label || field.name}
+          onChange={(next) => set(field.name, next)}
         />
       );
     }
@@ -362,5 +368,110 @@ function ChoicesControl({
         </option>
       ))}
     </select>
+  );
+}
+
+/** date/datetime input with an explicit calendar button: the native picker
+ * indicator is easy to miss, so the button calls input.showPicker() (Chromium
+ * 99+) to pop the calendar on demand. */
+function PickerInput({
+  inputType,
+  className,
+  disabled,
+  value,
+  iconLabel,
+  onChange,
+}: {
+  inputType: 'date' | 'datetime-local';
+  className: string;
+  disabled?: boolean;
+  value: string;
+  iconLabel: string;
+  onChange: (next: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        ref={inputRef}
+        type={inputType}
+        className={className}
+        disabled={disabled}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button
+        type="button"
+        aria-label={iconLabel}
+        title={iconLabel}
+        disabled={disabled}
+        className="shrink-0 rounded-md border border-border-medium p-2 text-text-secondary transition-colors hover:bg-surface-active-alt disabled:opacity-50"
+        onClick={() => {
+          inputRef.current?.focus();
+          inputRef.current?.showPicker?.();
+        }}
+      >
+        <Calendar className="size-4" aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+/** file/directory input + a Browse button that opens the NATIVE Windows
+ * dialog via the local Toolhost (browsers never expose local paths). */
+function PathPickInput({
+  mode,
+  className,
+  disabled,
+  placeholder,
+  browseLabel,
+  value,
+  dialogTitle,
+  onChange,
+}: {
+  mode: 'file' | 'directory';
+  className: string;
+  disabled?: boolean;
+  placeholder?: string;
+  browseLabel: string;
+  value: string;
+  dialogTitle: string;
+  onChange: (next: string) => void;
+}) {
+  const localize = useLocalize();
+  const [picking, setPicking] = useState(false);
+  const browse = async () => {
+    setPicking(true);
+    try {
+      const path = await pickLocalPath(mode, dialogTitle);
+      if (path) {
+        onChange(path);
+      }
+    } catch {
+      /* Toolhost offline or pick failed — the text input stays usable. */
+    } finally {
+      setPicking(false);
+    }
+  };
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        className={className}
+        disabled={disabled}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button
+        type="button"
+        disabled={disabled || picking}
+        className="flex shrink-0 items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt disabled:opacity-50"
+        onClick={() => void browse()}
+      >
+        <FolderOpen className="size-4" aria-hidden="true" />
+        {picking ? localize('com_toolbox_widget_picking') : browseLabel}
+      </button>
+    </div>
   );
 }

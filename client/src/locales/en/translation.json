@@ -3077,5 +3077,8 @@
   "com_toolbox_plugin_upgrade": "Upgrade to {{version}}",
   "com_toolbox_plugin_uninstall": "Uninstall",
   "com_toolbox_plugin_launch_failed": "Host launch failed",
-  "com_toolbox_no_result": "No result"
+  "com_toolbox_no_result": "No result",
+  "com_toolbox_widget_browse": "Browse…",
+  "com_toolbox_widget_picking": "Picking…",
+  "com_toolbox_widget_open_calendar": "Open calendar"
 }
