@@ -150,7 +150,6 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
       return (
         <PickerInput
           inputType="date"
-          className={commonCls}
           disabled={disabled}
           value={String(value ?? '')}
           iconLabel={localize('com_toolbox_widget_open_calendar')}
@@ -162,7 +161,6 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
       return (
         <PickerInput
           inputType="datetime-local"
-          className={commonCls}
           disabled={disabled}
           value={String(value ?? '')}
           iconLabel={localize('com_toolbox_widget_open_calendar')}
@@ -197,7 +195,6 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
       return (
         <PathPickInput
           mode={field.hint.widget === 'file' ? 'file' : 'directory'}
-          commonCls={commonCls}
           disabled={disabled}
           placeholder={
             field.hint.placeholder ??
@@ -371,19 +368,27 @@ function ChoicesControl({
   );
 }
 
+/* Combo shell: one bordered box (same border/radius/focus ring as every
+ * other input) with a bare input and an inline action button inside — the
+ * button reads as part of the control instead of a sibling element. */
+const COMBO_SHELL =
+  'flex w-full items-stretch overflow-hidden rounded-md border border-border-medium bg-surface-primary text-sm focus-within:border-border-xheavy';
+const COMBO_INPUT =
+  'min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-text-primary placeholder-text-tertiary outline-none';
+const COMBO_BUTTON =
+  'flex shrink-0 items-center gap-1.5 border-l border-border-medium px-2.5 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt';
+
 /** date/datetime input with an explicit calendar button: the native picker
  * indicator is easy to miss, so the button calls input.showPicker() (Chromium
  * 99+) to pop the calendar on demand. */
 function PickerInput({
   inputType,
-  className,
   disabled,
   value,
   iconLabel,
   onChange,
 }: {
   inputType: 'date' | 'datetime-local';
-  className: string;
   disabled?: boolean;
   value: string;
   iconLabel: string;
@@ -391,11 +396,11 @@ function PickerInput({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
-    <div className="flex items-center gap-2">
+    <div className={COMBO_SHELL}>
       <input
         ref={inputRef}
         type={inputType}
-        className={className}
+        className={COMBO_INPUT}
         disabled={disabled}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -405,7 +410,7 @@ function PickerInput({
         aria-label={iconLabel}
         title={iconLabel}
         disabled={disabled}
-        className="shrink-0 rounded-md border border-border-medium p-2 text-text-secondary transition-colors hover:bg-surface-active-alt disabled:opacity-50"
+        className={COMBO_BUTTON}
         onClick={() => {
           inputRef.current?.focus();
           inputRef.current?.showPicker?.();
@@ -421,7 +426,6 @@ function PickerInput({
  * dialog via the local Toolhost (browsers never expose local paths). */
 function PathPickInput({
   mode,
-  className,
   disabled,
   placeholder,
   browseLabel,
@@ -430,7 +434,6 @@ function PathPickInput({
   onChange,
 }: {
   mode: 'file' | 'directory';
-  className: string;
   disabled?: boolean;
   placeholder?: string;
   browseLabel: string;
@@ -454,10 +457,10 @@ function PathPickInput({
     }
   };
   return (
-    <div className="flex items-center gap-2">
+    <div className={COMBO_SHELL}>
       <input
         type="text"
-        className={className}
+        className={COMBO_INPUT}
         disabled={disabled}
         placeholder={placeholder}
         value={value}
@@ -466,7 +469,7 @@ function PathPickInput({
       <button
         type="button"
         disabled={disabled || picking}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt disabled:opacity-50"
+        className={COMBO_BUTTON}
         onClick={() => void browse()}
       >
         <FolderOpen className="size-4" aria-hidden="true" />
