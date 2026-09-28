@@ -118,3 +118,28 @@ export const useReportToolRun = () =>
       post<{ recorded: boolean }>('/api/terravox/runs/report', body),
     onError: () => undefined,
   });
+
+export type MyRun = {
+  id: string;
+  tool_id: string;
+  version?: string | null;
+  status: 'succeeded' | 'failed' | 'stopped' | 'timeout';
+  duration_ms?: number | null;
+  source?: string;
+  created_at: string;
+};
+
+export type MyRunList = { runs: MyRun[]; total: number };
+
+/** Current user's own usage records (gateway run_reports, contracts 2.10.0) —
+ * data source for the server-tool run-history section. Mirrors the Toolhost
+ * hook: 30s freshness, no retries (the section degrades to the empty state). */
+export const useMyRunsForTool = (toolId: string) =>
+  useQuery({
+    queryKey: ['terravox', 'myruns', toolId],
+    queryFn: () =>
+      get<MyRunList>(`/api/terravox/runs?tool_id=${encodeURIComponent(toolId)}&limit=200`),
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+    retry: false,
+  });

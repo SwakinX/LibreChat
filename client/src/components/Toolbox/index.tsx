@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react';
 import { Button } from '@librechat/client';
 import { useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, MonitorX, Play, Wrench } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
+import { RunRecordsSection, type RunRecordRow } from './RunRecordsSection';
 import { useAuthContext, useDocumentTitle, useLocalize } from '~/hooks';
 import { isDesktopTool, type MergedTool } from './toolStatus';
+import { useExecuteTool, useMyRunsForTool } from './api';
 import { useMergedTools } from './toolhostHooks';
 import LocalRunner from './LocalRunner';
-import { useExecuteTool } from './api';
 import SchemaForm from './SchemaForm';
 import ResultView from './ResultView';
 import { cn } from '~/utils';
@@ -100,12 +102,19 @@ function ToolBody({ selected }: { selected: MergedTool | null }) {
 
 function ToolRunner({ manifest }: { manifest: ToolManifest }) {
   const localize = useLocalize();
+  const queryClient = useQueryClient();
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [needsConfirm, setNeedsConfirm] = useState(false);
   const [ackDanger, setAckDanger] = useState(false);
   const [outcome, setOutcome] = useState<ExecuteResult | null>(null);
   const [error, setError] = useState<{ code?: string; message: string } | null>(null);
   const execute = useExecuteTool(manifest.tool_id);
+
+  /* Server executions land in the gateway's usage records on terminal states
+   * (success/error/timeout) — refresh the bottom history section accordingly.
+   * NEEDS_CONFIRMATION is a pre-run rejection with no record, so it skips. */
+  const refreshMyRuns = () =>
+    void queryClient.invalidateQueries({ queryKey: ['terravox', 'myruns', manifest.tool_id] });
 
   const run = async () => {
     setError(null);
@@ -116,6 +125,7 @@ function ToolRunner({ manifest }: { manifest: ToolManifest }) {
         confirmed: manifest.dangerous ? ackDanger || needsConfirm : undefined,
       });
       setOutcome(result);
+      refreshMyRuns();
     } catch (err) {
       const e = err as Error & { code?: string; payload?: { message?: string } };
       const detailMessage = e.payload?.message ?? e.message;
@@ -124,6 +134,7 @@ function ToolRunner({ manifest }: { manifest: ToolManifest }) {
         return;
       }
       setError({ code: e.code, message: detailMessage });
+      refreshMyRuns();
     }
   };
 
@@ -198,6 +209,23 @@ function ToolRunner({ manifest }: { manifest: ToolManifest }) {
           <ResultView outcome={outcome} manifest={manifest} />
         </section>
       )}
+
+      <MyRunRecords toolId={manifest.tool_id} />
     </div>
   );
+}
+
+/** Server-tool twin of LocalRunner's run-history section: rows come from the
+ * gateway's usage records (own rows only) instead of the local Toolhost —
+ * same presentational shell (contracts 2.10.0). */
+export function MyRunRecords({ toolId }: { toolId: string }) {
+  const localize = useLocalize();
+  const query = useMyRunsForTool(toolId);
+  const rows: RunRecordRow[] = (query.data?.runs ?? []).map((run) => ({
+    key: run.id,
+    status: run.status,
+    created_at: run.created_at ?? '',
+    duration_ms: run.duration_ms ?? null,
+  }));
+  return <RunRecordsSection rows={rows} localize={localize} />;
 }
