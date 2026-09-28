@@ -172,6 +172,15 @@ router.delete(
   handler(() => '/api/v1/nextcloud/link', { method: 'DELETE' }),
 );
 
+/* Direct-run terminal report from the toolbox page (local-tool-plan §8):
+ * the browser posts best-effort once a local run finishes; user identity is
+ * the forwarded OIDC bearer. */
+router.post(
+  '/runs/report',
+  jsonBody,
+  handler(() => '/api/v1/runs/report', { method: 'POST', body: (req) => req.body }),
+);
+
 /* Admin surface for the admin panel: tool/group CRUD, batch import, handler
  * list. All calls arrive server-side from the admin panel (Bearer JWT, no
  * browser session cookie), so they always forward with the service token plus
@@ -276,6 +285,24 @@ router.post(
   adminHandler(() => '/api/v1/admin/gitea/repos/check', {
     method: 'POST',
     body: (req) => req.body,
+  }),
+);
+
+/* Usage-stats query for the admin panel's page + CSV export: filters
+ * (tool/user/time range) and pagination forwarded verbatim; the panel loops
+ * pages for a full export. */
+router.get(
+  '/admin/runs/reports',
+  adminHandler((req) => {
+    const params = new URLSearchParams();
+    for (const key of ['tool_id', 'user_sub', 'since', 'until', 'limit', 'offset']) {
+      const value = req.query[key];
+      if (value !== undefined && value !== '') {
+        params.set(key, String(value));
+      }
+    }
+    const query = params.toString();
+    return `/api/v1/admin/runs/reports${query ? `?${query}` : ''}`;
   }),
 );
 
