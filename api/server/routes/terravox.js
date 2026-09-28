@@ -230,6 +230,15 @@ router.post(
   jsonBody,
   adminHandler(() => '/api/v1/admin/tools/import', { method: 'POST', body: (req) => req.body }),
 );
+
+/* Pending repo updates for the admin panel's confirm-before-publish flow
+ * (2026-09-28 governance: users never see repo versions ahead of the
+ * approved manifest until an admin confirms them). Literal route declared
+ * beside the other literal /admin/tools routes, above the `:toolId` params. */
+router.get(
+  '/admin/tools/pending-updates',
+  adminHandler(() => '/api/v1/admin/tools/pending-updates'),
+);
 router.put(
   '/admin/tools/:toolId',
   jsonBody,
