@@ -31,7 +31,7 @@ import { cn } from '~/utils';
 export default function Toolbox() {
   const localize = useLocalize();
   const { user } = useAuthContext();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const toolId = searchParams.get('tool');
   const { tools, online } = useMergedTools();
   const selected = useMemo(
