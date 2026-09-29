@@ -201,6 +201,12 @@ router.post('/tools/:toolId/execute-upload', async (req, res) => {
       .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
       .send(payload);
   } catch (error) {
+    logger.error(
+      '[terravox] execute-upload/file-download forward failed:',
+      error?.name,
+      error?.message,
+      error?.cause?.code ?? '',
+    );
     const message =
       error.name === 'AbortError' ? 'Tool Gateway timed out' : 'Tool Gateway unreachable';
     return res.status(502).json({ message: `${message} (${GATEWAY_URL})` });
@@ -242,6 +248,12 @@ router.get('/files/download', async (req, res) => {
     }
     return res.end();
   } catch (error) {
+    logger.error(
+      '[terravox] execute-upload/file-download forward failed:',
+      error?.name,
+      error?.message,
+      error?.cause?.code ?? '',
+    );
     const message =
       error.name === 'AbortError' ? 'Tool Gateway timed out' : 'Tool Gateway unreachable';
     return res.status(502).json({ message: `${message} (${GATEWAY_URL})` });
