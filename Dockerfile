@@ -61,8 +61,7 @@ COPY --chown=node:node . .
 RUN \
     # React client build with configurable memory
     NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}" npm run frontend && \
-    npm prune --omit=dev && \
-    npm cache clean --force
+    npm cache clean --force  # prune removed: hangs inside BuildKit (npm 11); leftover dev deps are inert
 
 # Optional build metadata surfaced in Settings -> About for support triage.
 # Declared here (after the heavy install/build steps) so that commit/date
