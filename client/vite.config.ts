@@ -117,7 +117,8 @@ export default defineConfig(({ command }) => ({
           'assets/locale-*.js',
           'assets/query-devtools*.js',
         ],
-        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        /** vendor 含 Leaflet + SuperMap iClient GIS 库后达 ~9.3MB（2026-09-29）。 */
+        maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
         /**
          * vite-plugin-pwa defaults this to `/^assets\//`, which is only true for the
          * hashed bundle output: the icons live in `assets/` under stable filenames, so the
