@@ -1,13 +1,15 @@
 import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import '@supermapgis/iclient-leaflet';
 import { useLocalize } from '~/hooks';
 import { useMapConfig } from './api';
 
 /**
- * Leaflet 地图面板（2.15.0）：底图 = iServer REST 栅格瓦片（nginx 同源反代
- * /iserver/，URL 模板由 gateway /map/config 下发，凭据不进前端）；可选 GeoJSON
- * 结果叠加（自动 fitBounds + 要素点击弹属性）。只读——无编辑无测量。
+ * Leaflet 地图面板（2.15.0，iClient 版）：底图用官方
+ * L.supermap.tiledMapLayer（切图方案由 SuperMap 组件处理），服务根 URL 由
+ * gateway /map/config 下发，浏览器经 nginx 同源反代 /iserver/ 访问；可选
+ * GeoJSON 结果叠加（自动 fitBounds + 要素点击弹属性）。只读。
  */
 export default function MapPanel({
   className,
@@ -28,11 +30,17 @@ export default function MapPanel({
       return;
     }
     const map = L.map(containerRef.current, {
-      center: config.center as [number, number],
+      center: config.center.length ? (config.center as [number, number]) : [39.9, 116.4],
       zoom: config.zoom,
       zoomControl: true,
     });
-    L.tileLayer(config.tile_url_template, { tileSize: 256 }).addTo(map);
+    /* SuperMap 官方组件：tiledMapLayer 自动处理 iServer 切图方案。 */
+    const tiled = (
+      L as unknown as {
+        supermap: { tiledMapLayer: (url: string) => L.TileLayer };
+      }
+    ).supermap.tiledMapLayer(config.map_url);
+    tiled.addTo(map);
     L.control.scale({ imperial: false }).addTo(map);
     mapRef.current = map;
     return () => {

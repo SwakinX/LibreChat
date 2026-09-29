@@ -59,6 +59,7 @@
     "@radix-ui/react-tabs": "^1.1.21",
     "@radix-ui/react-toast": "^1.2.23",
     "@react-spring/web": "^9.7.5",
+    "@supermapgis/iclient-leaflet": "^11.2.0",
     "@tanstack/react-query": "^4.28.0",
     "@tanstack/react-table": "^8.11.7",
     "class-variance-authority": "^0.7.1",
