@@ -199,13 +199,15 @@ export const useChoicesFrom = (
 
 export type MapConfig = {
   configured: boolean;
-  tile_url_template: string;
+  map_url: string;
   center: [number, number];
   zoom: number;
+  epsg?: number | null;
 };
 
-/** Base-tile template + initial view for the map panel (same-origin via the
- * nginx /iserver/ reverse proxy; no credentials reach the browser). */
+/** iServer map service root + initial view for the map panel. The browser
+ * talks to the iServer origin address directly (2026-09-29); spatial data
+ * queries still go through the gateway, so no credentials reach the browser. */
 export const useMapConfig = () =>
   useQuery({
     queryKey: ['terravox', 'map', 'config'],

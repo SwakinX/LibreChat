@@ -39,14 +39,18 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
     const required = new Set(manifest.parameters?.required ?? []);
     const names = [...(order ?? []), ...Object.keys(props).filter((n) => !order?.includes(n))];
     return names
-      .filter((name) => props[name] && hints[name]?.widget !== 'hidden')
+      .filter(
+        (name) =>
+          /* upload 字段是 multipart 专用（contracts 2.15.0），刻意不在 parameters.properties 里 */
+          (props[name] || hints[name]?.widget === 'upload') && hints[name]?.widget !== 'hidden',
+      )
       .map((name) => {
         const prop = props[name] as Record<string, unknown>;
         const enumValues = Array.isArray(prop.enum) ? (prop.enum as string[]) : undefined;
         return {
           name,
           hint: hints[name] ?? {},
-          required: required.has(name),
+          required: required.has(name) || hints[name]?.widget === 'upload',
           type: typeof prop.type === 'string' ? prop.type : 'string',
           enumValues,
           default: prop.default,

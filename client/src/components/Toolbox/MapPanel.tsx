@@ -32,11 +32,15 @@ export default function MapPanel({
     /* iServer 端 dom 服务 center=[0,-90]（服务未配中心）——无效中心用默认视野。 */
     const [cx, cy] = config.center.length ? config.center : [0, 0];
     const centerValid = Math.abs(cx) + Math.abs(cy) > 1e-6;
+    /* 经纬度切图服务（CGCS2000/WGS84，如 dom EPSG:4490）必须用度单位 CRS，
+     * 否则 iClient 换算出的 scale 与服务切图级别对不上，瓦片返回空白。 */
+    const degreeCrs = config.epsg === 4326 || config.epsg === 4490 ? L.CRS.EPSG4326 : undefined;
     const map = L.map(containerRef.current, {
       // 默认视野：四川全省（服务未配中心/范围时兜底，2026-09-29 用户指定）
       center: centerValid ? ([cx, cy] as [number, number]) : [30.6, 104.0],
       zoom: centerValid ? config.zoom : 7,
       zoomControl: true,
+      ...(degreeCrs ? { crs: degreeCrs } : {}),
     });
     /* SuperMap 官方组件：tiledMapLayer 自动处理 iServer 切图方案。 */
     const tiled = (
