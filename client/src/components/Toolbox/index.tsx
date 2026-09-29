@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Button } from '@librechat/client';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, HelpCircle, MonitorX, Play, Wrench } from 'lucide-react';
+import { AlertTriangle, HelpCircle, Map as MapIcon, MonitorX, Play, Wrench } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
 import {
   isDesktopTool,
@@ -51,19 +51,28 @@ export default function Toolbox() {
   const showOfflineHint =
     !online &&
     (selectedIsLocal || (!selected && tools.some((tool) => isLocallyManagedTool(tool.manifest))));
+  /* Header copy: map panel rebrands the whole page (2026-09-29 user request). */
+  const headerTitle = isMapPanel
+    ? localize('com_toolbox_map_browser')
+    : (selected?.manifest.display_name ?? localize('com_toolbox_title'));
+  const headerDesc = isMapPanel
+    ? localize('com_toolbox_map_desc')
+    : (selected?.manifest.description ?? localize('com_toolbox_subtitle'));
 
   return (
     /* No bg class: the content pane inherits the body theme background —
      * identical to the chat page (2026-09-28 user directive). */
     <div className="flex h-full flex-col overflow-hidden text-text-primary">
       <header className="flex items-center gap-3 border-b border-border-light px-4 py-3">
-        <Wrench className="size-5 shrink-0 text-text-tertiary" aria-hidden="true" />
+        {isMapPanel ? (
+          <MapIcon className="size-5 shrink-0 text-text-tertiary" aria-hidden="true" />
+        ) : (
+          <Wrench className="size-5 shrink-0 text-text-tertiary" aria-hidden="true" />
+        )}
         {/* 工具标题与信息直接放在页面标题栏：选中工具后取代静态"工具箱"标题 */}
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate text-base font-semibold">
-              {selected ? selected.manifest.display_name : localize('com_toolbox_title')}
-            </h1>
+            <h1 className="truncate text-base font-semibold">{headerTitle}</h1>
             {selected?.manifest.dangerous && (
               <span className="flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="size-3" aria-hidden="true" />
@@ -71,9 +80,7 @@ export default function Toolbox() {
               </span>
             )}
           </div>
-          <span className="truncate text-xs text-text-tertiary">
-            {selected ? selected.manifest.description : localize('com_toolbox_subtitle')}
-          </span>
+          <span className="truncate text-xs text-text-tertiary">{headerDesc}</span>
         </div>
         {selected && (
           <code className="text-text-quaternary shrink-0 text-xs">{selected.manifest.tool_id}</code>

@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { CloudUpload, FileDown } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
 import MarkdownLite from '~/components/Chat/Messages/Content/MarkdownLite';
-import { downloadProxyFile, saveCloudText } from './api';
+import { downloadProxyFile, saveTempToDrive } from './api';
+import CloudPickerDialog from './CloudPickerDialog';
 import { useLocalize } from '~/hooks';
 import MapPanel from './MapPanel';
 
@@ -26,14 +27,16 @@ export default function ResultView({ outcome, manifest }: ResultViewProps) {
     return [];
   }, [result]);
 
-  /* 文本类结果一键存云盘（2.16.0）；file/link 结果本就在用户云盘，跳过 */
+  /* 文本类结果直接下载（2.16.0 改版：不再默认写云盘） */
   const saveText = useMemo(
     () => saveTextFor(manifest, renderer, result, rows),
     [manifest, renderer, result, rows],
   );
   return (
     <div className="flex flex-col gap-2">
-      {saveText !== null && <SaveToCloud text={saveText} toolId={manifest.tool_id} />}
+      {saveText !== null && (
+        <DownloadButton text={saveText.text} ext={saveText.ext} toolId={manifest.tool_id} />
+      )}
       <ResultBody outcome={outcome} manifest={manifest} />
     </div>
   );
@@ -126,17 +129,7 @@ function ResultBody({ outcome, manifest }: ResultViewProps) {
     return (
       <ul className="flex flex-col gap-1.5">
         {links.map((link) => (
-          <li key={`${link.label}-${link.url}`}>
-            <button
-              type="button"
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-sm text-text-secondary transition-colors hover:bg-surface-active-alt hover:text-text-primary"
-              onClick={() => void downloadProxyFile(link.url, link.label)}
-            >
-              <FileDown className="size-4" aria-hidden="true" />
-              {localize('com_toolbox_file_download')}
-              {link.label && <code className="text-xs">{link.label}</code>}
-            </button>
-          </li>
+          <FileLink key={`${link.label}-${link.url}`} link={link} />
         ))}
       </ul>
     );
@@ -248,20 +241,20 @@ function stringify(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 }
 
-/** Textual save targets (2.16.0): text/markdown/table/json results can be
- * one-click stored into the user's drive; file/link/map results are skipped
- * (file results already live in the user's TerraVox/ folder). */
+/** Textual download targets (2.16.0 改版): text/markdown/table/json results
+ * download straight to the browser instead of being written to the drive. */
 function saveTextFor(
   manifest: ToolManifest,
   renderer: string,
   result: unknown,
   rows: Record<string, unknown>[],
-): string | null {
+): { text: string; ext: string } | null {
   if (renderer === 'text') {
-    return typeof result === 'string' ? result : stringify(result);
+    return { text: typeof result === 'string' ? result : stringify(result), ext: 'txt' };
   }
   if (renderer === 'markdown') {
-    return markdownContent(result);
+    const content = markdownContent(result);
+    return content === null ? null : { text: content, ext: 'md' };
   }
   if (renderer === 'table') {
     const columns =
@@ -270,54 +263,111 @@ function saveTextFor(
       return null;
     }
     const esc = (value: unknown) => `"${String(formatCell(value)).replaceAll('"', '""')}"`;
-    return [columns, ...rows.map((row) => columns.map((c) => esc(row[c])))]
-      .map((cells) => cells.join(','))
-      .join('\n');
+    return {
+      text: [columns, ...rows.map((row) => columns.map((c) => esc(row[c])))]
+        .map((cells) => cells.join(','))
+        .join('\n'),
+      ext: 'csv',
+    };
   }
   if (renderer === 'map' || renderer === 'file' || renderer === 'link') {
     return null;
   }
-  return JSON.stringify(result, null, 2);
+  return { text: JSON.stringify(result, null, 2), ext: 'json' };
 }
 
-/** 一键存云盘：文本内容写入用户云盘 TerraVox/uploads/（成功显示落盘路径）。 */
-function SaveToCloud({ text, toolId }: { text: string; toolId: string }) {
+const stampName = (toolId: string, ext: string) =>
+  `${toolId.replace(/\./g, '_')}_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.${ext}`;
+
+/** 文本结果下载（2.16.0 改版：Blob 直接存盘，不再默认写云盘）。 */
+function DownloadButton({ text, ext, toolId }: { text: string; ext: string; toolId: string }) {
   const localize = useLocalize();
-  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [savedPath, setSavedPath] = useState('');
-  const save = async () => {
-    setState('saving');
-    try {
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const res = await saveCloudText(`${toolId.replace(/\./g, '_')}_${stamp}.txt`, text);
-      setSavedPath(res.path);
-      setState('saved');
-    } catch {
-      setState('error');
-    }
+  const download = () => {
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = stampName(toolId, ext);
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
   };
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       <button
         type="button"
         className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-text-secondary transition-colors hover:bg-surface-active-alt hover:text-text-primary"
-        disabled={state === 'saving'}
-        onClick={() => void save()}
+        onClick={download}
       >
-        <CloudUpload className="size-3.5" aria-hidden="true" />
-        {state === 'saving'
-          ? localize('com_toolbox_cloud_saving')
-          : localize('com_toolbox_cloud_save')}
+        <FileDown className="size-3.5" aria-hidden="true" />
+        {localize('com_toolbox_result_download')}
       </button>
-      {state === 'saved' && (
-        <span className="text-emerald-600 dark:text-emerald-400">
-          {localize('com_toolbox_cloud_saved')}
-          {savedPath ? `: ${savedPath}` : ''}
+    </div>
+  );
+}
+
+/** file 结果单行：直接下载；临时产物（/files/temp/…）另有「保存到云盘」，
+ * 弹目录选择器选定文件夹后由网关转存（2.16.0）。 */
+function FileLink({ link }: { link: { label: string; url: string } }) {
+  const localize = useLocalize();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedPath, setSavedPath] = useState('');
+  const [error, setError] = useState(false);
+  const token = link.url.includes('/files/temp/')
+    ? link.url.split('/files/temp/')[1].split('?')[0]
+    : '';
+  const saveToDrive = async (dir: string) => {
+    setSaving(true);
+    setError(false);
+    try {
+      const res = await saveTempToDrive(token, dir, link.label);
+      setSavedPath(res.path);
+    } catch {
+      setError(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <li className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-sm text-text-secondary transition-colors hover:bg-surface-active-alt hover:text-text-primary"
+        onClick={() => void downloadProxyFile(link.url, link.label)}
+      >
+        <FileDown className="size-4" aria-hidden="true" />
+        {localize('com_toolbox_file_download')}
+        {link.label && <code className="text-xs">{link.label}</code>}
+      </button>
+      {token && (
+        <button
+          type="button"
+          className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt hover:text-text-primary"
+          disabled={saving}
+          onClick={() => setPickerOpen(true)}
+        >
+          <CloudUpload className="size-3.5" aria-hidden="true" />
+          {saving ? localize('com_toolbox_cloud_saving') : localize('com_toolbox_cloud_save')}
+        </button>
+      )}
+      {savedPath && (
+        <span className="text-xs text-emerald-600 dark:text-emerald-400">
+          {localize('com_toolbox_cloud_saved')}: {savedPath}
         </span>
       )}
-      {state === 'error' && (
-        <span className="text-text-error">{localize('com_toolbox_cloud_save_fail')}</span>
+      {error && (
+        <span className="text-text-error text-xs">{localize('com_toolbox_cloud_save_fail')}</span>
       )}
-    </div>
+      {token && (
+        <CloudPickerDialog
+          open={pickerOpen}
+          mode="dir"
+          onClose={() => setPickerOpen(false)}
+          onPick={(picked) => picked[0] && void saveToDrive(picked[0].path)}
+        />
+      )}
+    </li>
   );
 }

@@ -291,11 +291,60 @@ router.get(
   ),
 );
 
+/* Temp artifact download (2.16.0): stream bytes verbatim from the gateway's
+ * in-memory run store — same shape as /files/download, never buffered. */
+router.get('/files/temp/:token', async (req, res) => {
+  const accessToken = await resolveAccessToken(req, res);
+  if (!accessToken) {
+    return res
+      .status(503)
+      .json({ message: 'Tool Gateway requires an OpenID session token. Log out and back in.' });
+  }
+  try {
+    const upstream = await fetch(
+      `${GATEWAY_URL}/api/v1/files/temp/${encodeURIComponent(req.params.token)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!upstream.ok || !upstream.body) {
+      const payload = await upstream.text();
+      return res
+        .status(upstream.status)
+        .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
+        .send(payload);
+    }
+    res.status(upstream.status);
+    const disposition = upstream.headers.get('content-disposition');
+    if (disposition) {
+      res.set('Content-Disposition', disposition);
+    }
+    res.set('Content-Type', upstream.headers.get('content-type') || 'application/octet-stream');
+    const reader = upstream.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    return res.end();
+  } catch (error) {
+    logger.error('[terravox] temp file forward failed:', error?.name, error?.message);
+    const message =
+      error.name === 'AbortError' ? 'Tool Gateway timed out' : 'Tool Gateway unreachable';
+    return res.status(502).json({ message: `${message} (${GATEWAY_URL})` });
+  }
+});
+
 /* One-click save of textual tool results into the user's drive (2.16.0). */
 router.post(
   '/nextcloud/save-text',
   jsonBody,
   handler(() => '/api/v1/nextcloud/save-text', { method: 'POST', body: (req) => req.body }),
+);
+
+/* Save a temp artifact into the user's chosen drive folder (2.16.0). */
+router.post(
+  '/nextcloud/save-file',
+  jsonBody,
+  handler(() => '/api/v1/files/temp/save-to-drive', { method: 'POST', body: (req) => req.body }),
 );
 
 /* Direct-run terminal report from the toolbox page (local-tool-plan §8):
