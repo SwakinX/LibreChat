@@ -274,6 +274,14 @@ router.get(
   handler(() => '/api/v1/services'),
 );
 
+/* Direct-add temp layers (2.16.0): resolve a pasted iServer REST service URL into
+ * type + candidates. Read-only probe; nothing is written to the registry. */
+router.post(
+  '/services/resolve',
+  jsonBody,
+  handler(() => '/api/v1/services/resolve', { method: 'POST', body: (req) => req.body }),
+);
+
 /* Direct-run terminal report from the toolbox page (local-tool-plan §8):
  * the browser posts best-effort once a local run finishes; user identity is
  * the forwarded OIDC bearer. */

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom } from 'jotai';
-import { AlertTriangle, ChevronDown, ExternalLink } from 'lucide-react';
 import { useMediaQuery, buttonVariants, Spinner } from '@librechat/client';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { AlertTriangle, ChevronDown, ExternalLink, Map as MapIcon } from 'lucide-react';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import type { MergedTool } from './toolStatus';
 import { isLocallyManagedTool, isWebTool } from './toolStatus';
@@ -13,7 +13,7 @@ import { Collapse } from '~/components/ui';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 
-/** Namespace → i18n key for the sidebar groups; unknown namespaces show the raw name. */
+/** 分组键：管理端 display_group 优先（自由文本分组），缺省回退工具命名空间。 */
 const GROUP_LABEL_KEYS: Record<string, TranslationKeys> = {
   nextcloud: 'com_toolbox_group_nextcloud',
   spatial: 'com_toolbox_group_spatial',
@@ -22,7 +22,9 @@ const GROUP_LABEL_KEYS: Record<string, TranslationKeys> = {
 };
 
 const groupOf = (tool: MergedTool): string =>
-  tool.manifest.tool_id.split('.')[0] ?? tool.manifest.tool_id;
+  tool.manifest.display_group?.trim() ||
+  tool.manifest.tool_id.split('.')[0] ||
+  tool.manifest.tool_id;
 
 /**
  * Sidebar panel for /toolbox — the tool list the conversations list is on the
@@ -45,6 +47,7 @@ export default function ToolboxSection() {
   const [groupsExpanded, setGroupsExpanded] = useAtom(groupsExpandedAtom);
 
   const activeTool = searchParams.get('tool');
+  const isMapActive = searchParams.get('panel') === 'map';
 
   /** Entering the panel from the icon strip navigates to the tool surface.
    * Mount-only (initial path captured once): re-running on every pathname
@@ -122,6 +125,21 @@ export default function ToolboxSection() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+      </div>
+      {/* 地图浏览器：独立面板（非 manifest 工具），固定在工具列表顶部 */}
+      <div className="px-3 pb-1">
+        <button
+          onClick={() => toggleNav(() => navigate('/toolbox?panel=map'))}
+          aria-current={isMapActive}
+          className={cn(
+            'flex h-9 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start text-sm transition-colors',
+            isMapActive ? 'bg-surface-active-alt' : 'hover:bg-surface-active-alt',
+          )}
+          type="button"
+        >
+          <MapIcon className="size-4 shrink-0 text-text-tertiary" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">{localize('com_toolbox_map_browser')}</span>
+        </button>
       </div>
       <div className="scrollbar-gutter-stable min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <div className="flex min-h-full flex-col">

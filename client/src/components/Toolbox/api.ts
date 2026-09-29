@@ -250,3 +250,50 @@ export async function downloadProxyFile(url: string, filename: string): Promise<
   document.body.removeChild(anchor);
   setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
+
+export type ServiceBinding = {
+  id: string;
+  name: string;
+  type: 'iserver_map' | 'iserver_data';
+  base_url: string;
+  service_path: string;
+  datasource: string;
+  allowed_groups: string[];
+  enabled: boolean;
+  status: string;
+  probe_detail: string;
+  probed_at: string | null;
+};
+
+export type ServiceList = { services: ServiceBinding[]; total: number };
+
+/** Visible service bindings (contracts 2.16.0): the gateway filters by the
+ * user's groups — this is the map browser's layer-tree source. */
+export const useServices = () =>
+  useQuery({
+    queryKey: ['terravox', 'services'],
+    queryFn: () => get<ServiceList>('/api/terravox/services'),
+    staleTime: 60_000,
+  });
+
+export type ResolveResult = {
+  type: 'iserver_map' | 'iserver_data';
+  base: string;
+  service_path: string;
+  status: string;
+  detail: string;
+  draft: {
+    maps?: string[];
+    epsg?: number;
+    datasources?: string[];
+    dataset_counts?: Record<string, number>;
+    datasets?: Record<string, string[]>;
+  };
+};
+
+/** Resolve a pasted iServer REST URL into type + candidates (2.16.0 direct-add
+ * temp layers). Read-only probe — nothing is written to the registry. */
+export const useResolveService = () =>
+  useMutation({
+    mutationFn: (url: string) => post<ResolveResult>('/api/terravox/services/resolve', { url }),
+  });

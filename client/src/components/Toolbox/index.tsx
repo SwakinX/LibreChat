@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Button } from '@librechat/client';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Map as MapIcon, MonitorX, Play, Wrench, X } from 'lucide-react';
+import { AlertTriangle, HelpCircle, MonitorX, Play, Wrench } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
 import {
   isDesktopTool,
@@ -20,8 +20,8 @@ import PluginRunner from './PluginRunner';
 import LocalRunner from './LocalRunner';
 import SchemaForm from './SchemaForm';
 import ResultView from './ResultView';
+import MapBrowser from './MapBrowser';
 import WebRunner from './WebRunner';
-import MapPanel from './MapPanel';
 import { cn } from '~/utils';
 
 /** TerraVox Toolbox: manifest-driven tool runner (/toolbox). The sidebar's
@@ -31,7 +31,7 @@ import { cn } from '~/utils';
 export default function Toolbox() {
   const localize = useLocalize();
   const { user } = useAuthContext();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const toolId = searchParams.get('tool');
   const { tools, online } = useMergedTools();
   const selected = useMemo(
@@ -78,41 +78,22 @@ export default function Toolbox() {
         {selected && (
           <code className="text-text-quaternary shrink-0 text-xs">{selected.manifest.tool_id}</code>
         )}
-        <button
-          type="button"
-          className="flex shrink-0 items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt hover:text-text-primary"
-          onClick={() =>
-            setSearchParams((prev) => {
-              const next = new URLSearchParams(prev);
-              next.set('panel', 'map');
-              return next;
-            })
-          }
-        >
-          <MapIcon className="size-3.5" aria-hidden="true" />
-          {localize('com_toolbox_map_open')}
-        </button>
+        {/* 帮助按钮：manifest.help_url 配了才显示（管理端可配），新开标签页 */}
+        {selected?.manifest.help_url && (
+          <a
+            href={selected.manifest.help_url}
+            target="_blank"
+            rel="noreferrer"
+            title={localize('com_toolbox_help')}
+            className="flex shrink-0 items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt hover:text-text-primary"
+          >
+            <HelpCircle className="size-3.5" aria-hidden="true" />
+            {localize('com_toolbox_help')}
+          </a>
+        )}
       </header>
 
-      {isMapPanel && (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
-          <button
-            type="button"
-            className="flex w-fit cursor-pointer items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt hover:text-text-primary"
-            onClick={() =>
-              setSearchParams((prev) => {
-                const next = new URLSearchParams(prev);
-                next.delete('panel');
-                return next;
-              })
-            }
-          >
-            <X className="size-3.5" aria-hidden="true" />
-            {localize('com_toolbox_map_close')}
-          </button>
-          <MapPanel className="min-h-0 w-full flex-1 rounded-lg border border-border-medium" />
-        </div>
-      )}
+      {isMapPanel && <MapBrowser />}
       {!isMapPanel && (
         <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">

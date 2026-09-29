@@ -15,7 +15,10 @@ export type FieldHint = {
     | 'datetime'
     | 'file'
     | 'directory'
-    | 'hidden';
+    | 'hidden'
+    /** 2.15.0: browser file bytes go through the multipart execute channel
+     * (distinct from 'file' = a local path string). */
+    | 'upload';
   choices?: string[];
   /** Extension filter for the file widget (2.13.0): leading-dot entries
    * like ['.gdb', '.shp'] — the native dialog shows matching files only. */
@@ -33,6 +36,12 @@ export type ToolManifest = {
   allowed_groups?: string[];
   enabled?: boolean;
   dangerous?: boolean;
+  /** 2.16.0 presentation group (sidebar grouping); empty = tool_id namespace. */
+  display_group?: string;
+  /** 2.16.0 help doc URL — header help button; absent = no button. */
+  help_url?: string;
+  /** 2.16.0 usage-stats opt-out (gateway stops writing run_reports). */
+  usage_stats?: boolean;
   parameters?: {
     type: 'object';
     properties?: Record<string, Record<string, unknown>>;
