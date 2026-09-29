@@ -11,6 +11,8 @@ RUN apk add --no-cache python3 py3-pip uv
 ENV LD_PRELOAD=/usr/lib/libjemalloc.so.2
 # Disable dependency installation analytics before any npm lifecycle scripts run.
 ENV SCARF_ANALYTICS=false
+# iClient deps include remote (tarball URL) transitive deps; npm >= 11.6 blocks them by default.
+ENV npm_config_allow_remote=all
 
 # Add `uv` for extended MCP support
 COPY --from=ghcr.io/astral-sh/uv:0.9.5-python3.12-alpine /usr/local/bin/uv /usr/local/bin/uvx /bin/
