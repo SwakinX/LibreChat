@@ -38,6 +38,8 @@ jest.mock('../toolhostHooks', () => ({
 
 jest.mock('../api', () => ({
   useReportToolRun: () => mockReport,
+  /* CloudPickerDialog (SchemaForm upload) needs a benign browse hook */
+  useCloudBrowse: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 
 jest.mock('@tanstack/react-query', () => ({

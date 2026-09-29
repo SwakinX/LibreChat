@@ -9,6 +9,7 @@ import SchemaForm from '../SchemaForm';
 
 jest.mock('../api', () => ({
   useChoicesFrom: jest.fn(),
+  useCloudBrowse: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 
 jest.mock('~/hooks', () => ({

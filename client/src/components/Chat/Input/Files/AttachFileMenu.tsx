@@ -2,6 +2,7 @@ import React, { useRef, useState, useMemo, useCallback } from 'react';
 import { useRecoilState } from 'recoil';
 import * as Ariakit from '@ariakit/react';
 import {
+  Cloud,
   FileSearch,
   ImageUpIcon,
   FileType2Icon,
@@ -42,7 +43,9 @@ import {
 } from '~/hooks';
 import { useSharePointFileHandlingNoChatContext } from '~/hooks/Files/useSharePointFileHandling';
 import { useShortcutAriaKey, useShortcutHint } from '~/hooks/useKeyboardShortcuts';
+import CloudPickerDialog from '~/components/Toolbox/CloudPickerDialog';
 import { SharePointPickerDialog } from '~/components/SharePoint';
+import { fetchCloudFile } from '~/components/Toolbox/api';
 import { useGetStartupConfig } from '~/data-provider';
 import { ephemeralAgentByConvoId } from '~/store';
 import { MenuItemProps } from '~/common';
@@ -116,7 +119,7 @@ const AttachFileMenu = ({
     ephemeralAgentByConvoId(conversationId),
   );
   const toolResourceRef = useRef<EToolResources | undefined>();
-  const { handleFileChange } = useFileHandlingNoChatContext(undefined, {
+  const { handleFileChange, handleFiles } = useFileHandlingNoChatContext(undefined, {
     files,
     setFiles,
     setFilesLoading,
@@ -133,6 +136,7 @@ const AttachFileMenu = ({
   const sharePointEnabled = startupConfig?.sharePointFilePickerEnabled;
 
   const [isSharePointDialogOpen, setIsSharePointDialogOpen] = useState(false);
+  const [isCloudDialogOpen, setIsCloudDialogOpen] = useState(false);
 
   /** TODO: Ephemeral Agent Capabilities
    * Allow defining agent capabilities on a per-endpoint basis
@@ -206,8 +210,16 @@ const AttachFileMenu = ({
         },
         icon: <SharePointIcon className="icon-md" />,
       },
+      {
+        label: localize('com_files_upload_nextcloud'),
+        onClick: () => {
+          toolResourceRef.current = undefined;
+          setIsCloudDialogOpen(true);
+        },
+        icon: <Cloud className="icon-md" />,
+      },
     ],
-    [localize, handleUnifiedUpload, setIsSharePointDialogOpen],
+    [localize, handleUnifiedUpload, setIsSharePointDialogOpen, setIsCloudDialogOpen],
   );
 
   const dropdownItems = useMemo(() => {
@@ -328,6 +340,15 @@ const AttachFileMenu = ({
       return localItems;
     }
 
+    /* 云盘入口（2.16.0）：与会话工具资源无关的普通附件来源 */
+    localItems.push({
+      label: localize('com_files_upload_nextcloud'),
+      onClick: () => {
+        toolResourceRef.current = undefined;
+        setIsCloudDialogOpen(true);
+      },
+      icon: <Cloud className="icon-md" />,
+    });
     return localItems;
   }, [
     localize,
@@ -343,6 +364,7 @@ const AttachFileMenu = ({
     codeAllowedByAgent,
     fileSearchAllowedByAgent,
     setIsSharePointDialogOpen,
+    setIsCloudDialogOpen,
   ]);
 
   const menuTrigger = (
@@ -374,6 +396,17 @@ const AttachFileMenu = ({
       setIsSharePointDialogOpen(false);
     } catch (error) {
       console.error('SharePoint file processing error:', error);
+    }
+  };
+
+  /* 云盘选取 → 网关代理取回字节 → 标准附件管线（与 SharePoint 同构） */
+  const handleCloudFilesSelected = async (picked: { path: string; name: string }[]) => {
+    try {
+      const fetched = await Promise.all(picked.map((entry) => fetchCloudFile(entry.path)));
+      await handleFiles(fetched, toolResourceRef.current);
+      setIsCloudDialogOpen(false);
+    } catch (error) {
+      console.error('Nextcloud file processing error:', error);
     }
   };
 
@@ -429,6 +462,20 @@ const AttachFileMenu = ({
           isDownloading={isProcessing}
           downloadProgress={downloadProgress}
           maxSelectionCount={endpointFileConfig?.fileLimit}
+        />
+        <CloudPickerDialog
+          open={isCloudDialogOpen}
+          mode="file"
+          multi
+          onClose={() => setIsCloudDialogOpen(false)}
+          onPick={(picked) => void handleCloudFilesSelected(picked)}
+        />
+        <CloudPickerDialog
+          open={isCloudDialogOpen}
+          mode="file"
+          multi
+          onClose={() => setIsCloudDialogOpen(false)}
+          onPick={(picked) => void handleCloudFilesSelected(picked)}
         />
       </>
     );

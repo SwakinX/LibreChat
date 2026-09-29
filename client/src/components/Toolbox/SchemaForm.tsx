@@ -1,8 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import { Calendar, FolderOpen } from 'lucide-react';
+import { Calendar, Cloud, FolderOpen } from 'lucide-react';
 import type { FieldHint, ToolManifest } from './types';
 import type { ChoiceOption } from './api';
+import CloudPickerDialog from './CloudPickerDialog';
 import { pickLocalPath } from './toolhost';
+import { fetchCloudFile } from './api';
 import { useChoicesFrom } from './api';
 import { useLocalize } from '~/hooks';
 
@@ -59,6 +61,8 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
   }, [manifest]);
 
   const set = (name: string, value: unknown) => onChange({ ...values, [name]: value });
+  /* upload 控件的云盘取文件：记录当前字段，选中即转为 File 走 multipart 通道 */
+  const [cloudField, setCloudField] = useState<string | null>(null);
 
   const renderControl = (field: FieldDef, value: unknown) => {
     const commonCls =
@@ -224,6 +228,15 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
               }}
             />
           </label>
+          <button
+            type="button"
+            className="flex shrink-0 items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt"
+            disabled={disabled}
+            onClick={() => setCloudField(field.name)}
+          >
+            <Cloud className="size-4" aria-hidden="true" />
+            {localize('com_toolbox_widget_pick_cloud')}
+          </button>
           <span className="min-w-0 truncate text-xs text-text-secondary">
             {picked
               ? `${picked.name} (${Math.ceil(picked.size / 1024)} KB)`
@@ -284,6 +297,19 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
       {fields.length === 0 && (
         <p className="text-sm text-text-tertiary">{localize('com_toolbox_no_params')}</p>
       )}
+      <CloudPickerDialog
+        open={cloudField !== null}
+        mode="file"
+        onClose={() => setCloudField(null)}
+        onPick={(picked) => {
+          const name = cloudField;
+          setCloudField(null);
+          if (!name) {
+            return;
+          }
+          void fetchCloudFile(picked[0].path).then((file) => set(name, file));
+        }}
+      />
     </div>
   );
 }

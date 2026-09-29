@@ -1,8 +1,8 @@
-import { useMemo } from 'react';
-import { FileDown } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { CloudUpload, FileDown } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
 import MarkdownLite from '~/components/Chat/Messages/Content/MarkdownLite';
-import { downloadProxyFile } from './api';
+import { downloadProxyFile, saveCloudText } from './api';
 import { useLocalize } from '~/hooks';
 import MapPanel from './MapPanel';
 
@@ -10,6 +10,36 @@ type ResultViewProps = { outcome: ExecuteResult; manifest: ToolManifest };
 
 /** Render an execution result by its manifest renderer (table/text/markdown/json for v1). */
 export default function ResultView({ outcome, manifest }: ResultViewProps) {
+  const { renderer, result } = outcome;
+
+  const rows = useMemo<Record<string, unknown>[]>(() => {
+    if (Array.isArray(result)) {
+      return result as Record<string, unknown>[];
+    }
+    if (
+      result &&
+      typeof result === 'object' &&
+      Array.isArray((result as { entries?: unknown }).entries)
+    ) {
+      return (result as { entries: Record<string, unknown>[] }).entries;
+    }
+    return [];
+  }, [result]);
+
+  /* 文本类结果一键存云盘（2.16.0）；file/link 结果本就在用户云盘，跳过 */
+  const saveText = useMemo(
+    () => saveTextFor(manifest, renderer, result, rows),
+    [manifest, renderer, result, rows],
+  );
+  return (
+    <div className="flex flex-col gap-2">
+      {saveText !== null && <SaveToCloud text={saveText} toolId={manifest.tool_id} />}
+      <ResultBody outcome={outcome} manifest={manifest} />
+    </div>
+  );
+}
+
+function ResultBody({ outcome, manifest }: ResultViewProps) {
   const localize = useLocalize();
   const { renderer, result } = outcome;
 
@@ -216,4 +246,78 @@ function formatCell(value: unknown): string {
 
 function stringify(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+}
+
+/** Textual save targets (2.16.0): text/markdown/table/json results can be
+ * one-click stored into the user's drive; file/link/map results are skipped
+ * (file results already live in the user's TerraVox/ folder). */
+function saveTextFor(
+  manifest: ToolManifest,
+  renderer: string,
+  result: unknown,
+  rows: Record<string, unknown>[],
+): string | null {
+  if (renderer === 'text') {
+    return typeof result === 'string' ? result : stringify(result);
+  }
+  if (renderer === 'markdown') {
+    return markdownContent(result);
+  }
+  if (renderer === 'table') {
+    const columns =
+      manifest.result?.config?.columns ?? (rows.length > 0 ? Object.keys(rows[0]) : []);
+    if (columns.length === 0) {
+      return null;
+    }
+    const esc = (value: unknown) => `"${String(formatCell(value)).replaceAll('"', '""')}"`;
+    return [columns, ...rows.map((row) => columns.map((c) => esc(row[c])))]
+      .map((cells) => cells.join(','))
+      .join('\n');
+  }
+  if (renderer === 'map' || renderer === 'file' || renderer === 'link') {
+    return null;
+  }
+  return JSON.stringify(result, null, 2);
+}
+
+/** 一键存云盘：文本内容写入用户云盘 TerraVox/uploads/（成功显示落盘路径）。 */
+function SaveToCloud({ text, toolId }: { text: string; toolId: string }) {
+  const localize = useLocalize();
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [savedPath, setSavedPath] = useState('');
+  const save = async () => {
+    setState('saving');
+    try {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const res = await saveCloudText(`${toolId.replace(/\./g, '_')}_${stamp}.txt`, text);
+      setSavedPath(res.path);
+      setState('saved');
+    } catch {
+      setState('error');
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <button
+        type="button"
+        className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-text-secondary transition-colors hover:bg-surface-active-alt hover:text-text-primary"
+        disabled={state === 'saving'}
+        onClick={() => void save()}
+      >
+        <CloudUpload className="size-3.5" aria-hidden="true" />
+        {state === 'saving'
+          ? localize('com_toolbox_cloud_saving')
+          : localize('com_toolbox_cloud_save')}
+      </button>
+      {state === 'saved' && (
+        <span className="text-emerald-600 dark:text-emerald-400">
+          {localize('com_toolbox_cloud_saved')}
+          {savedPath ? `: ${savedPath}` : ''}
+        </span>
+      )}
+      {state === 'error' && (
+        <span className="text-text-error">{localize('com_toolbox_cloud_save_fail')}</span>
+      )}
+    </div>
+  );
 }

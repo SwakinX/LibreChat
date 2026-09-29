@@ -297,3 +297,35 @@ export const useResolveService = () =>
   useMutation({
     mutationFn: (url: string) => post<ResolveResult>('/api/terravox/services/resolve', { url }),
   });
+
+export type CloudEntry = {
+  name: string;
+  type: 'dir' | 'file';
+  size: number;
+  modified: string;
+};
+
+export type CloudListing = { path: string; entries: CloudEntry[] };
+
+/** Browse a folder of the current user's own Nextcloud (2.16.0 picker source).
+ * The gateway PROPFINDs with the user's stored app credential. */
+export const useCloudBrowse = (path: string, enabled: boolean) =>
+  useQuery({
+    queryKey: ['terravox', 'cloud', 'browse', path],
+    queryFn: () =>
+      get<CloudListing>(`/api/terravox/nextcloud/browse?path=${encodeURIComponent(path)}`),
+    enabled,
+  });
+
+/** Fetch a cloud file through the gateway proxy as a browser File — the input
+ * shape of the standard attachment pipeline (chat upload / execute-upload). */
+export async function fetchCloudFile(path: string): Promise<File> {
+  const blob = (await request.get(`/api/terravox/files/download?path=${encodeURIComponent(path)}`, {
+    responseType: 'blob',
+  })) as Blob;
+  return new File([blob], path.split('/').pop() ?? 'file');
+}
+
+/** One-click save of textual tool output into the user's drive (2.16.0). */
+export const saveCloudText = (filename: string, content: string) =>
+  post<{ path: string }>('/api/terravox/nextcloud/save-text', { filename, content });
