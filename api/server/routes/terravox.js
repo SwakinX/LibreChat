@@ -267,6 +267,13 @@ router.get(
   handler(() => '/api/v1/map/config'),
 );
 
+/* Visible service bindings for the current user (contracts 2.16.0): the data
+ * source for toolbox layer dropdowns and the map browser's layer tree. */
+router.get(
+  '/services',
+  handler(() => '/api/v1/services'),
+);
+
 /* Direct-run terminal report from the toolbox page (local-tool-plan §8):
  * the browser posts best-effort once a local run finishes; user identity is
  * the forwarded OIDC bearer. */
@@ -337,6 +344,47 @@ router.delete(
   adminHandler((req) => `/api/v1/admin/groups/${encodeURIComponent(req.params.name)}`, {
     method: 'DELETE',
   }),
+);
+
+/* Service registry (contracts 2.16.0): admin binds external GIS services
+ * (iServer map / data), probes availability, sets group visibility. */
+router.get(
+  '/admin/services',
+  adminHandler(() => '/api/v1/admin/services'),
+);
+router.post(
+  '/admin/services',
+  jsonBody,
+  adminHandler(() => '/api/v1/admin/services', { method: 'POST', body: (req) => req.body }),
+);
+router.patch(
+  '/admin/services/:serviceId',
+  jsonBody,
+  adminHandler((req) => `/api/v1/admin/services/${encodeURIComponent(req.params.serviceId)}`, {
+    method: 'PATCH',
+    body: (req) => req.body,
+  }),
+);
+router.delete(
+  '/admin/services/:serviceId',
+  adminHandler((req) => `/api/v1/admin/services/${encodeURIComponent(req.params.serviceId)}`, {
+    method: 'DELETE',
+  }),
+);
+router.post(
+  '/admin/services/:serviceId/probe',
+  adminHandler(
+    (req) => `/api/v1/admin/services/${encodeURIComponent(req.params.serviceId)}/probe`,
+    {
+      method: 'POST',
+    },
+  ),
+);
+router.get(
+  '/admin/services/:serviceId/datasources',
+  adminHandler(
+    (req) => `/api/v1/admin/services/${encodeURIComponent(req.params.serviceId)}/datasources`,
+  ),
 );
 router.get(
   '/admin/handlers',
