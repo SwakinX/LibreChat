@@ -282,6 +282,22 @@ router.post(
   handler(() => '/api/v1/services/resolve', { method: 'POST', body: (req) => req.body }),
 );
 
+/* Cloud-drive browsing for pickers (2.16.0): lists folders of the current
+ * user's own drive via their stored app credential (never sent to the browser). */
+router.get(
+  '/nextcloud/browse',
+  handler(
+    (req) => `/api/v1/nextcloud/browse?path=${encodeURIComponent(String(req.query.path ?? ''))}`,
+  ),
+);
+
+/* One-click save of textual tool results into the user's drive (2.16.0). */
+router.post(
+  '/nextcloud/save-text',
+  jsonBody,
+  handler(() => '/api/v1/nextcloud/save-text', { method: 'POST', body: (req) => req.body }),
+);
+
 /* Direct-run terminal report from the toolbox page (local-tool-plan §8):
  * the browser posts best-effort once a local run finishes; user identity is
  * the forwarded OIDC bearer. */
