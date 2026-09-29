@@ -2,6 +2,13 @@ import React, { useRef, useState, useMemo, useCallback } from 'react';
 import { useRecoilState } from 'recoil';
 import * as Ariakit from '@ariakit/react';
 import {
+  FileUpload,
+  TooltipAnchor,
+  DropdownPopup,
+  AttachmentIcon,
+  SharePointIcon,
+} from '@librechat/client';
+import {
   Cloud,
   FileSearch,
   ImageUpIcon,
@@ -9,14 +16,6 @@ import {
   FileImageIcon,
   TerminalSquareIcon,
 } from 'lucide-react';
-import {
-  IconButton,
-  FileUpload,
-  TooltipAnchor,
-  DropdownPopup,
-  AttachmentIcon,
-  SharePointIcon,
-} from '@librechat/client';
 import {
   Providers,
   EToolResources,
@@ -195,32 +194,41 @@ const AttachFileMenu = ({
   /** Unified mode removed the destination chooser, not the source chooser. SharePoint has
    *  no trigger of its own, so without this the picker becomes unreachable whenever the
    *  composer is in unified mode. Destination stays implicit on both sources. */
-  const unifiedSourceItems = useMemo<MenuItemProps[]>(
-    () => [
+  const unifiedSourceItems = useMemo<MenuItemProps[]>(() => {
+    const items: MenuItemProps[] = [
       {
         label: localize('com_files_upload_local_machine'),
         onClick: handleUnifiedUpload,
         icon: <FileImageIcon className="icon-md" />,
       },
-      {
+    ];
+    if (sharePointEnabled) {
+      items.push({
         label: localize('com_files_upload_sharepoint'),
         onClick: () => {
           toolResourceRef.current = undefined;
           setIsSharePointDialogOpen(true);
         },
         icon: <SharePointIcon className="icon-md" />,
+      });
+    }
+    /* 云盘入口常驻：agents 等 unified 场景没有 SharePoint 时也要可达（2.16.0） */
+    items.push({
+      label: localize('com_files_upload_nextcloud'),
+      onClick: () => {
+        toolResourceRef.current = undefined;
+        setIsCloudDialogOpen(true);
       },
-      {
-        label: localize('com_files_upload_nextcloud'),
-        onClick: () => {
-          toolResourceRef.current = undefined;
-          setIsCloudDialogOpen(true);
-        },
-        icon: <Cloud className="icon-md" />,
-      },
-    ],
-    [localize, handleUnifiedUpload, setIsSharePointDialogOpen, setIsCloudDialogOpen],
-  );
+      icon: <Cloud className="icon-md" />,
+    });
+    return items;
+  }, [
+    localize,
+    handleUnifiedUpload,
+    sharePointEnabled,
+    setIsSharePointDialogOpen,
+    setIsCloudDialogOpen,
+  ]);
 
   const dropdownItems = useMemo(() => {
     const setToolResource = (value: EToolResources | undefined) => {
@@ -419,41 +427,18 @@ const AttachFileMenu = ({
             handleFileChange(e, toolResourceRef.current);
           }}
         >
-          {sharePointEnabled === true ? (
-            <DropdownPopup
-              menuId="attach-file-menu"
-              className="overflow-visible"
-              isOpen={isPopoverActive}
-              setIsOpen={setIsPopoverActive}
-              modal={false}
-              portal={true}
-              unmountOnHide={true}
-              trigger={menuTrigger}
-              items={unifiedSourceItems}
-              iconClassName="mr-0"
-            />
-          ) : (
-            <TooltipAnchor
-              render={
-                <IconButton
-                  type="button"
-                  size="theme"
-                  shape="theme"
-                  disabled={isUploadDisabled}
-                  id="attach-file-button"
-                  label={localize('com_sidepanel_attach_files')}
-                  onClick={handleUnifiedUpload}
-                  aria-keyshortcuts={uploadFileAriaKey}
-                  className="p-1 hover:bg-surface-composer-hover"
-                >
-                  <AttachmentIcon />
-                </IconButton>
-              }
-              id="attach-file-button"
-              description={uploadFileTooltip}
-              disabled={isUploadDisabled}
-            />
-          )}
+          <DropdownPopup
+            menuId="attach-file-menu"
+            className="overflow-visible"
+            isOpen={isPopoverActive}
+            setIsOpen={setIsPopoverActive}
+            modal={false}
+            portal={true}
+            unmountOnHide={true}
+            trigger={menuTrigger}
+            items={unifiedSourceItems}
+            iconClassName="mr-0"
+          />
         </FileUpload>
         <SharePointPickerDialog
           isOpen={isSharePointDialogOpen}

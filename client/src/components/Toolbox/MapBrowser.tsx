@@ -306,6 +306,39 @@ export default function MapBrowser() {
     }
   }, [layers, features, mapReady]);
 
+  /* 叠放次序同步（图层树拖拽）：数组序 = 绘制序（数组末 = 树顶 = 地图最上层）。
+   * 矢量层按添加次序绘制（setZIndex 不作用于 SVG），顺序/显隐变化时按数组序
+   * 统一重挂一次；透明度/颜色调整不改 stamp，不触发。 */
+  const orderStampRef = useRef('');
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+    const stamp = layers.map((l) => `${l.key}:${l.visible ? 1 : 0}`).join('|');
+    if (stamp === orderStampRef.current) {
+      return;
+    }
+    orderStampRef.current = stamp;
+    const inst = instances.current;
+    for (const l of layers) {
+      if (l.kind === 'vector') {
+        const geo = inst.get(l.key);
+        if (geo && map.hasLayer(geo)) {
+          map.removeLayer(geo);
+        }
+      }
+    }
+    for (const l of layers) {
+      if (l.kind === 'vector' && l.visible) {
+        const geo = inst.get(l.key);
+        if (geo && features[l.key] && !map.hasLayer(geo)) {
+          geo.addTo(map);
+        }
+      }
+    }
+  }, [layers, features, mapReady]);
+
   const fetchFeatures = useCallback(
     async (
       key: string,
@@ -429,13 +462,15 @@ export default function MapBrowser() {
     void fetchFeatures(key, regId);
   };
 
-  /** 按当前地图范围重查全部矢量图层（图层树刷新按钮）。 */
+  /** 刷新（图层树按钮）：矢量层按当前地图范围重查，瓦片层强制重取。 */
   const refreshLayers = () => {
     const map = mapRef.current;
     const bbox = map ? mapBbox(map) : undefined;
     for (const l of layers) {
       if (l.kind === 'vector' && l.regId) {
         void fetchFeatures(l.key, l.regId, false, bbox);
+      } else if (l.kind === 'tiled') {
+        (instances.current.get(l.key) as L.TileLayer | undefined)?.redraw();
       }
     }
   };

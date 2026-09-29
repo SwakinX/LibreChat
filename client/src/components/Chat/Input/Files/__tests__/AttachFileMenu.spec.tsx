@@ -27,6 +27,11 @@ jest.mock('~/components/SharePoint', () => ({
   SharePointPickerDialog: () => null,
 }));
 
+jest.mock('~/components/Toolbox/CloudPickerDialog', () => ({
+  __esModule: true,
+  default: () => null,
+}));
+
 jest.mock('@librechat/client', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const R = require('react');
@@ -107,6 +112,7 @@ function setupMocks(overrides: { provider?: string } = {}) {
   const translations: Record<string, string> = {
     com_files_upload_local_machine: 'From Local Computer',
     com_files_upload_sharepoint: 'Upload from SharePoint',
+    com_files_upload_nextcloud: 'From Nextcloud',
     com_sidepanel_attach_files: 'Attach Files',
     com_ui_upload_code_environment: 'Upload to Code Environment',
     com_ui_upload_file_search: 'Upload for File Search',
@@ -164,14 +170,14 @@ describe('AttachFileMenu', () => {
   beforeEach(jest.clearAllMocks);
 
   describe('unified mode upload sources', () => {
-    it('uses a single upload button when SharePoint is disabled', () => {
+    it('offers local + Nextcloud sources when SharePoint is disabled', () => {
       setupMocks();
       renderMenu({ isUnifiedMode: true });
 
-      expect(screen.getByRole('button', { name: /attach files/i })).toBeInTheDocument();
-      expect(
-        screen.queryByRole('button', { name: /attach file options/i }),
-      ).not.toBeInTheDocument();
+      openMenu();
+      expect(screen.getByText('From Local Computer')).toBeInTheDocument();
+      expect(screen.getByText('From Nextcloud')).toBeInTheDocument();
+      expect(screen.queryByText('Upload from SharePoint')).not.toBeInTheDocument();
     });
 
     it('offers SharePoint alongside local upload when SharePoint is enabled', () => {
@@ -183,6 +189,7 @@ describe('AttachFileMenu', () => {
 
       expect(screen.getByText('From Local Computer')).toBeInTheDocument();
       expect(screen.getByText('Upload from SharePoint')).toBeInTheDocument();
+      expect(screen.getByText('From Nextcloud')).toBeInTheDocument();
     });
 
     it('does not offer a destination choice on either source', () => {
@@ -367,13 +374,12 @@ describe('AttachFileMenu', () => {
       expect(screen.getByTestId('dropdown-popup')).toHaveAttribute('data-portal', 'true');
     });
 
-    it('renders the unified upload button when legacyFileUploadUX is not true', () => {
+    it('renders the source menu (with cloud entry) in unified mode', () => {
       setupMocks();
       renderMenu({ isUnifiedMode: true });
-      expect(screen.getByRole('button', { name: /attach files/i })).toBeInTheDocument();
-      expect(
-        screen.queryByRole('button', { name: /attach file options/i }),
-      ).not.toBeInTheDocument();
+      openMenu();
+      expect(screen.getByText('From Local Computer')).toBeInTheDocument();
+      expect(screen.getByText('From Nextcloud')).toBeInTheDocument();
     });
   });
 
