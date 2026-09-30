@@ -102,6 +102,8 @@ export const useExecuteTool = (toolId: string) =>
 
 export type RunReportBody = {
   tool_id: string;
+  /** 工具显示名（2.19.0 使用统计展示用）。 */
+  tool_name?: string;
   version?: string;
   /** Terminal local-run status (preparing/running are never reported). */
   status: 'succeeded' | 'failed' | 'stopped' | 'timeout';
@@ -200,6 +202,8 @@ export const useChoicesFrom = (
 export type MapConfig = {
   configured: boolean;
   map_url: string;
+  /** 底图组（2.19.0）：按序叠放的多幅底图；env 回落时为单幅。 */
+  basemaps?: { name: string; url: string }[];
   center: [number, number];
   zoom: number;
   epsg?: number | null;

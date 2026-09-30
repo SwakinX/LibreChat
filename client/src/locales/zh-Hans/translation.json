@@ -3155,5 +3155,6 @@
   "com_toolbox_map_kind_vector": "矢量图层",
   "com_toolbox_map_kind_tiled": "瓦片图层",
   "com_toolbox_map_import_picked": "导入所选",
-  "com_toolbox_map_picked_count": "已选 {n} 项"
+  "com_toolbox_map_picked_count": "已选 {n} 项",
+  "com_toolbox_map_search": "筛选服务、地图或数据集"
 }

@@ -134,7 +134,7 @@ export default function MapBrowser() {
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const baseLayerRef = useRef<L.TileLayer | null>(null);
+  const baseLayersRef = useRef<L.TileLayer[]>([]);
   const instances = useRef<Map<string, L.Layer>>(new Map());
   const inFlight = useRef<Set<string>>(new Set());
   const fitted = useRef<Set<string>>(new Set());
@@ -169,25 +169,35 @@ export default function MapBrowser() {
     const iclient = (L as unknown as IClient).supermap;
     const degreeCrs = config.epsg === 4326 || config.epsg === 4490 ? L.CRS.EPSG4326 : undefined;
 
+    /* 底图组（2.19.0）：按 basemaps 数组序叠放（前者在下）；env 回落时单幅。 */
+    const basemapUrls = (
+      config.basemaps?.length ? config.basemaps : [{ name: '', url: config.map_url }]
+    )
+      .map((b) => b.url)
+      .filter(Boolean);
+
     const fallbackInit = () => {
       const map = L.map(el, {
         zoomControl: true,
         ...view,
         ...(degreeCrs ? { crs: degreeCrs } : {}),
       });
-      baseLayerRef.current = iclient.tiledMapLayer(config.map_url).addTo(map);
+      baseLayersRef.current = basemapUrls.map((url) => iclient.tiledMapLayer(url).addTo(map));
       return map;
     };
 
     (async () => {
       let map: L.Map;
       try {
-        el.id = 'map'; // initMap 以固定 id 建图
-        const created = await iclient.initMap(config.map_url, {
+        el.id = 'map'; // initMap 以固定 id 建图（首幅底图走官方切图方案）
+        const created = await iclient.initMap(basemapUrls[0], {
           mapOptions: { zoomControl: true, ...view },
         });
         map = created.map;
-        baseLayerRef.current = created.layer;
+        baseLayersRef.current = [
+          created.layer,
+          ...basemapUrls.slice(1).map((url) => iclient.tiledMapLayer(url).addTo(map)),
+        ];
       } catch {
         delete (el as unknown as { _leaflet_id?: number })._leaflet_id;
         map = fallbackInit();
@@ -207,7 +217,7 @@ export default function MapBrowser() {
         mapRef.current.remove();
         mapRef.current = null;
       }
-      baseLayerRef.current = null;
+      baseLayersRef.current = [];
       inst.clear();
       fittedSet.clear();
     };
@@ -215,20 +225,21 @@ export default function MapBrowser() {
 
   const baseLayer = layers.find((l) => l.kind === 'base');
 
-  /* 底图显隐/透明度。 */
+  /* 底图组显隐/透明度（整组统一）。 */
   useEffect(() => {
     const map = mapRef.current;
-    const base = baseLayerRef.current;
-    if (!map || !base || !baseLayer) {
+    if (!map || !baseLayer) {
       return;
     }
-    if (baseLayer.visible) {
-      if (!map.hasLayer(base)) {
-        base.addTo(map);
+    for (const base of baseLayersRef.current) {
+      if (baseLayer.visible) {
+        if (!map.hasLayer(base)) {
+          base.addTo(map);
+        }
+        base.setOpacity(baseLayer.opacity);
+      } else if (map.hasLayer(base)) {
+        map.removeLayer(base);
       }
-      base.setOpacity(baseLayer.opacity);
-    } else if (map.hasLayer(base)) {
-      map.removeLayer(base);
     }
   }, [baseLayer, mapReady]);
 
@@ -1140,6 +1151,8 @@ function AddLayerDialog({
   const [target, setTarget] = useState<AddTarget | null>(null);
   const [pickedMaps, setPickedMaps] = useState<string[]>([]);
   const [pickedVectors, setPickedVectors] = useState<string[]>([]);
+  const [svcFilter, setSvcFilter] = useState('');
+  const [layerFilter, setLayerFilter] = useState('');
   const [lastOpen, setLastOpen] = useState(false);
   const serviceId = target?.kind === 'map' ? target.bindingId : null;
   const mapsQuery = useServiceMaps(serviceId, open);
@@ -1150,9 +1163,12 @@ function AddLayerDialog({
       setTarget(null);
       setPickedMaps([]);
       setPickedVectors([]);
+      setSvcFilter('');
+      setLayerFilter('');
     }
   }
 
+  const match = (text: string, q: string) => text.toLowerCase().includes(q.trim().toLowerCase());
   const rowCls =
     'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-surface-active-alt';
   const check =
@@ -1191,59 +1207,71 @@ function AddLayerDialog({
             <p className="text-text-quaternary text-xs font-semibold uppercase">
               {localize('com_toolbox_map_pick_service')}
             </p>
+            <input
+              type="search"
+              className="mb-1 w-full rounded-lg border border-border-light bg-surface-primary px-3 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:border-border-medium focus:outline-none"
+              placeholder={localize('com_toolbox_map_search')}
+              aria-label={localize('com_toolbox_map_search')}
+              value={svcFilter}
+              onChange={(e) => setSvcFilter(e.target.value)}
+            />
             <div className="max-h-[50vh] min-h-40 overflow-y-auto rounded-lg border border-border-medium p-1">
-              {mapServices.map((svc) => (
-                <button
-                  key={svc.bindingId}
-                  type="button"
-                  className={
-                    rowCls +
-                    (target?.kind === 'map' && target.bindingId === svc.bindingId
-                      ? ' bg-surface-active-alt'
-                      : '')
-                  }
-                  onClick={() => {
-                    setTarget(svc);
-                    setPickedMaps([]);
-                  }}
-                >
-                  <Layers className="size-4 shrink-0 text-text-tertiary" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate" title={svc.label}>
-                    {svc.label}
-                  </span>
-                  <ChevronRight
-                    className="text-text-quaternary size-3.5 shrink-0"
-                    aria-hidden="true"
-                  />
-                </button>
-              ))}
-              {dataServices.map((entry) => {
-                const active =
-                  target?.kind === 'data' && target.entry.bindingId === entry.bindingId;
-                return (
+              {mapServices
+                .filter((svc) => match(svc.label, svcFilter))
+                .map((svc) => (
                   <button
-                    key={entry.bindingId}
+                    key={svc.bindingId}
                     type="button"
-                    className={rowCls + (active ? ' bg-surface-active-alt' : '')}
+                    className={
+                      rowCls +
+                      (target?.kind === 'map' && target.bindingId === svc.bindingId
+                        ? ' bg-surface-active-alt'
+                        : '')
+                    }
                     onClick={() => {
-                      setTarget({ kind: 'data', entry });
-                      setPickedVectors([]);
+                      setTarget(svc);
+                      setPickedMaps([]);
                     }}
                   >
-                    <FolderSearch
-                      className="size-4 shrink-0 text-text-tertiary"
-                      aria-hidden="true"
-                    />
-                    <span className="min-w-0 flex-1 truncate" title={entry.label}>
-                      {entry.label}
+                    <Layers className="size-4 shrink-0 text-text-tertiary" aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate" title={svc.label}>
+                      {svc.label}
                     </span>
                     <ChevronRight
                       className="text-text-quaternary size-3.5 shrink-0"
                       aria-hidden="true"
                     />
                   </button>
-                );
-              })}
+                ))}
+              {dataServices
+                .filter((entry) => match(entry.label, svcFilter))
+                .map((entry) => {
+                  const active =
+                    target?.kind === 'data' && target.entry.bindingId === entry.bindingId;
+                  return (
+                    <button
+                      key={entry.bindingId}
+                      type="button"
+                      className={rowCls + (active ? ' bg-surface-active-alt' : '')}
+                      onClick={() => {
+                        setTarget({ kind: 'data', entry });
+                        setPickedVectors([]);
+                      }}
+                    >
+                      <FolderSearch
+                        className="size-4 shrink-0 text-text-tertiary"
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 flex-1 truncate" title={entry.label}>
+                        {entry.label}
+                      </span>
+                      <ChevronRight
+                        className="text-text-quaternary size-3.5 shrink-0"
+                        aria-hidden="true"
+                      />
+                    </button>
+                  );
+                })}
               {mapServices.length === 0 && dataServices.length === 0 && (
                 <p className="p-3 text-center text-xs text-text-tertiary">
                   {localize('com_toolbox_map_no_bindings')}
@@ -1255,6 +1283,14 @@ function AddLayerDialog({
             <p className="text-text-quaternary text-xs font-semibold uppercase">
               {localize('com_toolbox_map_pick_layer')}
             </p>
+            <input
+              type="search"
+              className="mb-1 w-full rounded-lg border border-border-light bg-surface-primary px-3 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:border-border-medium focus:outline-none"
+              placeholder={localize('com_toolbox_map_search')}
+              aria-label={localize('com_toolbox_map_search')}
+              value={layerFilter}
+              onChange={(e) => setLayerFilter(e.target.value)}
+            />
             <div className="max-h-[40vh] min-h-40 overflow-y-auto rounded-lg border border-border-medium p-1">
               {!target && (
                 <p className="p-3 text-center text-xs text-text-tertiary">
@@ -1273,28 +1309,30 @@ function AddLayerDialog({
                       {(mapsQuery.error as Error).message}
                     </p>
                   )}
-                  {(mapsQuery.data?.maps ?? []).map((m: BindingMap) => {
-                    const picked = pickedMaps.includes(m.name);
-                    return (
-                      <button
-                        key={m.name}
-                        type="button"
-                        aria-pressed={picked}
-                        className={rowCls}
-                        onClick={() => setPickedMaps((prev) => toggle(prev, m.name))}
-                      >
-                        <span
-                          className={check + (picked ? ' border-indigo-500 bg-indigo-500' : '')}
-                          aria-hidden="true"
+                  {(mapsQuery.data?.maps ?? [])
+                    .filter((m) => match(m.name, layerFilter))
+                    .map((m: BindingMap) => {
+                      const picked = pickedMaps.includes(m.name);
+                      return (
+                        <button
+                          key={m.name}
+                          type="button"
+                          aria-pressed={picked}
+                          className={rowCls}
+                          onClick={() => setPickedMaps((prev) => toggle(prev, m.name))}
                         >
-                          {picked && <span className="size-2 rounded-sm bg-white" />}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate" title={m.name}>
-                          {m.name}
-                        </span>
-                      </button>
-                    );
-                  })}
+                          <span
+                            className={check + (picked ? ' border-indigo-500 bg-indigo-500' : '')}
+                            aria-hidden="true"
+                          >
+                            {picked && <span className="size-2 rounded-sm bg-white" />}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate" title={m.name}>
+                            {m.name}
+                          </span>
+                        </button>
+                      );
+                    })}
                   {!mapsQuery.isLoading && (mapsQuery.data?.maps ?? []).length === 0 && (
                     <p className="p-3 text-center text-xs text-text-tertiary">
                       {localize('com_toolbox_cloud_empty')}
@@ -1309,28 +1347,30 @@ function AddLayerDialog({
                       {localize('com_toolbox_cloud_empty')}
                     </p>
                   )}
-                  {target.entry.datasets.map((dataset) => {
-                    const picked = pickedVectors.includes(dataset.regId);
-                    return (
-                      <button
-                        key={dataset.regId}
-                        type="button"
-                        aria-pressed={picked}
-                        className={rowCls}
-                        onClick={() => setPickedVectors((prev) => toggle(prev, dataset.regId))}
-                      >
-                        <span
-                          className={check + (picked ? ' border-indigo-500 bg-indigo-500' : '')}
-                          aria-hidden="true"
+                  {target.entry.datasets
+                    .filter((dataset) => match(dataset.name, layerFilter))
+                    .map((dataset) => {
+                      const picked = pickedVectors.includes(dataset.regId);
+                      return (
+                        <button
+                          key={dataset.regId}
+                          type="button"
+                          aria-pressed={picked}
+                          className={rowCls}
+                          onClick={() => setPickedVectors((prev) => toggle(prev, dataset.regId))}
                         >
-                          {picked && <span className="size-2 rounded-sm bg-white" />}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate" title={dataset.name}>
-                          {dataset.name}
-                        </span>
-                      </button>
-                    );
-                  })}
+                          <span
+                            className={check + (picked ? ' border-indigo-500 bg-indigo-500' : '')}
+                            aria-hidden="true"
+                          >
+                            {picked && <span className="size-2 rounded-sm bg-white" />}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate" title={dataset.name}>
+                            {dataset.name}
+                          </span>
+                        </button>
+                      );
+                    })}
                 </>
               )}
             </div>

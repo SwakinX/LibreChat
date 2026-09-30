@@ -3148,5 +3148,6 @@
   "com_toolbox_map_kind_vector": "Vector layer",
   "com_toolbox_map_kind_tiled": "Tile layer",
   "com_toolbox_map_import_picked": "Import selected",
-  "com_toolbox_map_picked_count": "{n} selected"
+  "com_toolbox_map_picked_count": "{n} selected",
+  "com_toolbox_map_search": "Filter services, maps or datasets"
 }

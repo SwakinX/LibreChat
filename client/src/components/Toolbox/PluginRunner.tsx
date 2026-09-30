@@ -80,6 +80,7 @@ export default function PluginRunner({ tool }: { tool: MergedTool }) {
       await startRun.mutateAsync({ toolId: manifest.tool_id, arguments: {} });
       reportRun.mutate({
         tool_id: manifest.tool_id,
+        tool_name: manifest.display_name,
         version: local?.installed_version ?? manifest.version,
         status: 'succeeded',
         duration_ms: 0,

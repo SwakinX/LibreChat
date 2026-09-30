@@ -53,6 +53,12 @@ export default function MapPanel({
       : // 默认视野：四川全省（2026-09-29 用户指定；initMap 的 mapOptions 覆盖服务值）
         { center: [30.6, 104.0] as [number, number], zoom: 7 };
     const iclient = (L as unknown as IClient).supermap;
+    /* 底图组（2.19.0）：按序叠放（前者在下）；env 回落时为单幅。 */
+    const basemapUrls = (
+      config.basemaps?.length ? config.basemaps : [{ name: '', url: config.map_url }]
+    )
+      .map((b) => b.url)
+      .filter(Boolean);
 
     const fallbackInit = () => {
       /* 服务元信息 XHR 被跨域拦截时的兜底：EPSG:4326/4490 经纬度切图必须用
@@ -63,7 +69,10 @@ export default function MapPanel({
         ...view,
         ...(degreeCrs ? { crs: degreeCrs } : {}),
       });
-      iclient.tiledMapLayer(config.map_url).addTo(map);
+      /* 底图组（2.19.0）：按序叠放（前者在下）。 */
+      for (const b of basemapUrls) {
+        iclient.tiledMapLayer(b).addTo(map);
+      }
       return map;
     };
 
@@ -71,10 +80,13 @@ export default function MapPanel({
       let map: L.Map;
       try {
         el.id = 'map'; // initMap 以固定 id 建图
-        const created = await iclient.initMap(config.map_url, {
+        const created = await iclient.initMap(basemapUrls[0], {
           mapOptions: { zoomControl: true, ...view },
         });
         map = created.map;
+        for (const b of basemapUrls.slice(1)) {
+          iclient.tiledMapLayer(b).addTo(map);
+        }
       } catch {
         /* initMap 失败可能已在其固定容器上建了一半图，清掉标记再兜底 */
         delete (el as unknown as { _leaflet_id?: number })._leaflet_id;

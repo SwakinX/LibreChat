@@ -470,6 +470,10 @@ router.post(
   ),
 );
 router.get(
+  '/admin/services/:serviceId/maps',
+  adminHandler((req) => `/api/v1/services/${encodeURIComponent(req.params.serviceId)}/maps`),
+);
+router.get(
   '/admin/services/:serviceId/datasources',
   adminHandler(
     (req) => `/api/v1/admin/services/${encodeURIComponent(req.params.serviceId)}/datasources`,

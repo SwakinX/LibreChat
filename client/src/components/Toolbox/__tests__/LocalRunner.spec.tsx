@@ -264,6 +264,7 @@ describe('LocalRunner', () => {
     await waitFor(() => expect(mockReport.mutate).toHaveBeenCalledTimes(1));
     /* argument values never leave the machine — key names only */
     expect(mockReport.mutate).toHaveBeenCalledWith({
+      tool_name: 'Demo',
       tool_id: 'wangjianbo.toolsdemo',
       version: '1.0.0',
       status: 'failed',

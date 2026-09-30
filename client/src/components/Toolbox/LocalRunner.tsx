@@ -136,6 +136,7 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
     const finished = Date.parse(runData.finished_at ?? '');
     reportRun.mutate({
       tool_id: manifest.tool_id,
+      tool_name: manifest.display_name,
       version: runData.version ?? local?.installed_version ?? undefined,
       status: runData.status as 'succeeded' | 'failed' | 'stopped' | 'timeout',
       duration_ms:
@@ -143,7 +144,14 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
       argument_keys: Object.keys(runData.arguments ?? {}).slice(0, 16),
     });
     void queryClient.invalidateQueries({ queryKey: ['toolhost', 'runs', manifest.tool_id] });
-  }, [runData, reportRun, manifest.tool_id, local?.installed_version, queryClient]);
+  }, [
+    runData,
+    reportRun,
+    manifest.tool_id,
+    manifest.display_name,
+    local?.installed_version,
+    queryClient,
+  ]);
 
   const distribution = manifest.execution?.distribution;
   const installBody = () => {
