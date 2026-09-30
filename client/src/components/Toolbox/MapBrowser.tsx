@@ -364,6 +364,12 @@ export default function MapBrowser() {
       inFlight.current.add(key);
       try {
         /* 数据更新需重建 GeoJSON 实例（风格回调捕获旧数据无妨，实例整体换新） */
+        /* 数据更新需重建 GeoJSON 实例（风格回调捕获旧数据无妨，实例整体换新）；
+         * 旧实例必须同时从地图摘除，否则重查后新旧两层叠加渲染 */
+        const stale = instances.current.get(key);
+        if (stale && mapRef.current?.hasLayer(stale)) {
+          mapRef.current.removeLayer(stale);
+        }
         instances.current.delete(key);
         const outcome = await queryTool.mutateAsync({
           params: { layer: regId, max_features: QUERY_MAX_FEATURES, ...(bbox ? { bbox } : {}) },
