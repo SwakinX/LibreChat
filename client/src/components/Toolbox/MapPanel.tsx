@@ -113,6 +113,8 @@ export default function MapPanel({
       return;
     }
     const layer = L.geoJSON(geojson as never, {
+      /* 点要素用圆点（Leaflet 默认 marker 图标在打包环境 404） */
+      pointToLayer: (_feature, latlng) => L.circleMarker(latlng, { radius: 5, weight: 2 }),
       style: { color: '#6366f1', weight: 2, fillOpacity: 0.15 },
       onEachFeature: (feature, layerInstance) => {
         const props = (feature.properties ?? {}) as Record<string, unknown>;

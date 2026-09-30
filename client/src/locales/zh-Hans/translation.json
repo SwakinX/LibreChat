@@ -3147,5 +3147,11 @@
   "com_ui_web_search_api_subtitle": "搜索网络以获取最新信息",
   "com_toolbox_group_ungrouped": "未分组",
   "com_toolbox_map_opacity": "透明度",
-  "com_toolbox_map_drag_handle": "按住拖动调整图层顺序"
+  "com_toolbox_map_drag_handle": "按住拖动调整图层顺序",
+  "com_toolbox_map_properties": "属性",
+  "com_toolbox_map_layer_menu": "图层操作",
+  "com_toolbox_map_prop_type": "类型",
+  "com_toolbox_map_prop_features": "要素数",
+  "com_toolbox_map_kind_vector": "矢量图层",
+  "com_toolbox_map_kind_tiled": "瓦片图层"
 }

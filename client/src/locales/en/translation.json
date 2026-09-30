@@ -3140,5 +3140,11 @@
   "com_toolbox_file_download": "Download",
   "com_toolbox_group_ungrouped": "Ungrouped",
   "com_toolbox_map_opacity": "Opacity",
-  "com_toolbox_map_drag_handle": "Drag to reorder layers"
+  "com_toolbox_map_drag_handle": "Drag to reorder layers",
+  "com_toolbox_map_properties": "Properties",
+  "com_toolbox_map_layer_menu": "Layer actions",
+  "com_toolbox_map_prop_type": "Type",
+  "com_toolbox_map_prop_features": "Features",
+  "com_toolbox_map_kind_vector": "Vector layer",
+  "com_toolbox_map_kind_tiled": "Tile layer"
 }

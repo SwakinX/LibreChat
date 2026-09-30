@@ -19,9 +19,14 @@ import {
   Maximize,
   Plus,
   RefreshCw,
+  Settings2,
   Trash2,
 } from 'lucide-react';
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import type {
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from 'react';
 import 'leaflet/dist/leaflet.css';
 import '@supermapgis/iclient-leaflet';
 import {
@@ -121,6 +126,8 @@ export default function MapBrowser() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
+  /** 图层右键菜单（框架化：项见 layerContextItems，后续加操作直接追加）。 */
+  const [ctxMenu, setCtxMenu] = useState<{ key: string; x: number; y: number } | null>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -275,6 +282,8 @@ export default function MapBrowser() {
       if (data && !geo) {
         geo = L.geoJSON(data as never, {
           style: () => ({ color: l.color, weight: 2, fillOpacity: 0.2 }),
+          /* 点要素用圆点（Leaflet 默认 marker 图标在打包环境 404，也更适合叠加） */
+          pointToLayer: (_feature, latlng) => L.circleMarker(latlng, { radius: 5, weight: 2 }),
           onEachFeature: (feature, featureLayer) => {
             const props = (feature.properties ?? {}) as Record<string, unknown>;
             const text = Object.entries(props)
@@ -547,6 +556,49 @@ export default function MapBrowser() {
       url: `${s.base_url}/iserver/services/${s.service_path}`,
     }));
 
+  /** 图层右键菜单项（可扩展框架：需要新操作就在数组里追加一项）。 */
+  const layerContextItems = (l: MapLayer) => [
+    ...(l.kind === 'vector'
+      ? [
+          {
+            key: 'fit',
+            label: localize('com_toolbox_map_fit'),
+            icon: <Crosshair className="size-3.5" aria-hidden="true" />,
+            danger: false,
+            onClick: () => {
+              fitLayer(l);
+              setCtxMenu(null);
+            },
+          },
+        ]
+      : []),
+    {
+      key: 'props',
+      label: localize('com_toolbox_map_properties'),
+      icon: <Settings2 className="size-3.5" aria-hidden="true" />,
+      danger: false,
+      onClick: () => {
+        setSelectedKey(l.key);
+        setCtxMenu(null);
+      },
+    },
+    ...(l.kind !== 'base'
+      ? [
+          {
+            key: 'remove',
+            label: localize('com_toolbox_map_layer_remove'),
+            icon: <Trash2 className="size-3.5" aria-hidden="true" />,
+            danger: true,
+            onClick: () => {
+              removeLayer(l.key);
+              setCtxMenu(null);
+            },
+          },
+        ]
+      : []),
+  ];
+
+  const selectedLayer = layers.find((l) => l.key === selectedKey) ?? null;
   const overlayLayers = layers.filter((l) => l.kind !== 'base');
   /** 缩放到图层：矢量按要素范围 fitBounds（行内展开控制）。 */
   const fitLayer = (l: MapLayer) => {
@@ -637,7 +689,7 @@ export default function MapBrowser() {
 
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {notice && <p className="text-text-error px-1 pb-1 text-xs">{notice}</p>}
-          {/* 图层（顶部 = 最上层；拖拽把手改变绘制次序） */}
+          {/* 图层（顶部 = 最上层；拖拽把手改变绘制次序；右键菜单：缩放/属性/移除） */}
           {[...overlayLayers].reverse().map((l) => (
             <LayerTreeRow
               key={l.key}
@@ -646,10 +698,10 @@ export default function MapBrowser() {
               dragging={draggingKey === l.key}
               onSelect={() => setSelectedKey((prev) => (prev === l.key ? null : l.key))}
               onToggleVisible={() => patchLayer(l.key, { visible: !l.visible })}
-              onPatch={patchLayer}
-              onFit={l.kind === 'vector' ? () => fitLayer(l) : undefined}
-              onRefresh={l.regId ? () => refreshLayer(l) : undefined}
-              onRemove={() => removeLayer(l.key)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setCtxMenu({ key: l.key, x: e.clientX, y: e.clientY });
+              }}
               dragHandle
               onDragPointerDown={beginDrag}
               onDragPointerMove={onDragPointerMove}
@@ -672,7 +724,10 @@ export default function MapBrowser() {
                   setSelectedKey((prev) => (prev === baseLayer.key ? null : baseLayer.key))
                 }
                 onToggleVisible={() => patchLayer(baseLayer.key, { visible: !baseLayer.visible })}
-                onPatch={patchLayer}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setCtxMenu({ key: baseLayer.key, x: e.clientX, y: e.clientY });
+                }}
               />
             </div>
           )}
@@ -710,6 +765,72 @@ export default function MapBrowser() {
         )}
       </main>
 
+      {/* ── 图层属性面板（选中图层时出现在右侧；右键菜单「属性」即打开它） ── */}
+      {selectedLayer && (
+        <PropsPanel
+          layer={selectedLayer}
+          featureCount={
+            selectedLayer.kind === 'vector'
+              ? ((features[selectedLayer.key] as { features?: unknown[] } | undefined)?.features
+                  ?.length ?? null)
+              : null
+          }
+          onPatch={patchLayer}
+          onFit={selectedLayer.kind === 'vector' ? () => fitLayer(selectedLayer) : undefined}
+          onRefresh={selectedLayer.regId ? () => refreshLayer(selectedLayer) : undefined}
+          onRemove={
+            selectedLayer.kind !== 'base' ? () => removeLayer(selectedLayer.key) : undefined
+          }
+          onClose={() => setSelectedKey(null)}
+        />
+      )}
+
+      {/* ── 图层右键菜单（点击/再右键任意处关闭） ──────────────────── */}
+      {ctxMenu &&
+        (() => {
+          const menuLayer = layers.find((l) => l.key === ctxMenu.key);
+          if (!menuLayer) {
+            return null;
+          }
+          return (
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setCtxMenu(null)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setCtxMenu(null);
+                }}
+                aria-hidden="true"
+              />
+              <div
+                role="menu"
+                aria-label={localize('com_toolbox_map_layer_menu')}
+                className="fixed z-50 w-40 rounded-lg border border-border-medium bg-surface-primary py-1 shadow-lg"
+                style={{ left: ctxMenu.x, top: ctxMenu.y }}
+              >
+                {layerContextItems(menuLayer).map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    role="menuitem"
+                    className={
+                      'flex w-full items-center gap-2 px-3 py-1.5 text-start text-xs transition-colors hover:bg-surface-active-alt ' +
+                      (item.danger
+                        ? 'text-text-error'
+                        : 'text-text-secondary hover:text-text-primary')
+                    }
+                    onClick={item.onClick}
+                  >
+                    {item.icon}
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          );
+        })()}
+
       <AddLayerDialog
         open={addOpen}
         mapServices={boundMaps}
@@ -730,19 +851,16 @@ export default function MapBrowser() {
   );
 }
 
-/** 图层树单行：显隐 + 名称 + 拖拽把手；选中行内嵌展开控制（透明度/着色/
- * 缩放到图层/按范围重查/移除），不再依赖单独的属性面板。拖拽用 Pointer 事件
- * 自实现：把手上按下捕获指针，移动中命中哪行就交换到哪行，抬起结束。 */
+/** 图层树单行：显隐 + 名称 + 拖拽把手 + 右键菜单。样式控制集中在右侧
+ * 属性面板；拖拽用 Pointer 事件自实现：把手上按下捕获指针，移动中命中
+ * 哪行就交换到哪行，抬起结束。 */
 function LayerTreeRow({
   layer,
   selected,
   dragging,
   onSelect,
   onToggleVisible,
-  onPatch,
-  onFit,
-  onRefresh,
-  onRemove,
+  onContextMenu,
   dragHandle,
   onDragPointerDown,
   onDragPointerMove,
@@ -753,10 +871,7 @@ function LayerTreeRow({
   dragging: boolean;
   onSelect: () => void;
   onToggleVisible: () => void;
-  onPatch: (key: string, patch: Partial<MapLayer>) => void;
-  onFit?: () => void;
-  onRefresh?: () => void;
-  onRemove?: () => void;
+  onContextMenu: (e: ReactMouseEvent<HTMLElement>) => void;
   dragHandle?: boolean;
   onDragPointerDown?: (e: ReactPointerEvent<HTMLSpanElement>, key: string) => void;
   onDragPointerMove?: (e: ReactPointerEvent<HTMLElement>) => void;
@@ -766,6 +881,7 @@ function LayerTreeRow({
   return (
     <div
       data-layer-row={layer.key}
+      onContextMenu={onContextMenu}
       onPointerMove={dragHandle ? onDragPointerMove : undefined}
       onPointerUp={dragHandle ? onDragPointerUp : undefined}
       onPointerCancel={dragHandle ? onDragPointerUp : undefined}
@@ -821,68 +937,139 @@ function LayerTreeRow({
           {layer.name}
         </button>
       </div>
-      {/* 行内展开控制：透明度 +（矢量）着色/缩放/重查 + 移除 */}
-      {selected && (
-        <div className="mb-1 mt-0.5 flex flex-col gap-2 rounded-md border border-border-light p-2">
-          <div>
-            <p className="text-text-quaternary mb-1 text-xs">
-              {localize('com_toolbox_map_opacity')} · {Math.round(layer.opacity * 100)}%
-            </p>
-            <input
-              type="range"
-              min={0.1}
-              max={1}
-              step={0.05}
-              aria-label={`${layer.name} opacity`}
-              className="h-1 w-full accent-[var(--text-primary)]"
-              value={layer.opacity}
-              onChange={(e) => onPatch(layer.key, { opacity: Number(e.target.value) })}
-            />
+    </div>
+  );
+}
+
+/** 右侧图层属性面板：显隐 / 透明度 /（矢量）着色 / 信息 / 缩放 / 重查 / 移除。 */
+function PropsPanel({
+  layer,
+  featureCount,
+  onPatch,
+  onFit,
+  onRefresh,
+  onRemove,
+  onClose,
+}: {
+  layer: MapLayer;
+  featureCount: number | null;
+  onPatch: (key: string, patch: Partial<MapLayer>) => void;
+  onFit?: () => void;
+  onRefresh?: () => void;
+  onRemove?: () => void;
+  onClose: () => void;
+}) {
+  const localize = useLocalize();
+  const kindLabels: Record<LayerKind, string> = {
+    vector: localize('com_toolbox_map_kind_vector'),
+    tiled: localize('com_toolbox_map_kind_tiled'),
+    base: localize('com_toolbox_map_base'),
+  };
+  const kindLabel = kindLabels[layer.kind];
+  return (
+    <aside className="flex w-60 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-border-medium p-3 text-sm">
+      <div className="flex items-center gap-1">
+        <h3 className="min-w-0 flex-1 truncate font-semibold" title={layer.name}>
+          {layer.name || localize('com_toolbox_map_base')}
+        </h3>
+        <button
+          type="button"
+          className="text-text-quaternary rounded p-0.5 transition-colors hover:text-text-primary"
+          aria-label={localize('com_ui_close')}
+          onClick={onClose}
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-1 text-xs text-text-secondary">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-text-quaternary">{localize('com_toolbox_map_prop_type')}</span>
+          <span>{kindLabel}</span>
+        </div>
+        {layer.kind === 'vector' && featureCount !== null && (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-text-quaternary">
+              {localize('com_toolbox_map_prop_features')}
+            </span>
+            <span>{featureCount}</span>
           </div>
-          {layer.kind === 'vector' && (
-            <div className="flex items-center justify-between gap-2 text-xs">
-              <span className="text-text-quaternary">{localize('com_toolbox_map_style')}</span>
-              <input
-                type="color"
-                aria-label={localize('com_toolbox_map_style')}
-                className="size-5 cursor-pointer border-none bg-transparent p-0"
-                value={layer.color}
-                onChange={(e) => onPatch(layer.key, { color: e.target.value })}
-              />
-            </div>
+        )}
+      </div>
+
+      <label className="flex items-center justify-between gap-2 text-xs">
+        <span>
+          {layer.visible
+            ? localize('com_toolbox_map_layer_hide')
+            : localize('com_toolbox_map_layer_show')}
+        </span>
+        <input
+          type="checkbox"
+          className="accent-[var(--text-primary)]"
+          checked={layer.visible}
+          onChange={() => onPatch(layer.key, { visible: !layer.visible })}
+        />
+      </label>
+
+      <div>
+        <p className="text-text-quaternary mb-1 text-xs">
+          {localize('com_toolbox_map_opacity')} · {Math.round(layer.opacity * 100)}%
+        </p>
+        <input
+          type="range"
+          min={0.1}
+          max={1}
+          step={0.05}
+          aria-label={`${layer.name} opacity`}
+          className="h-1 w-full accent-[var(--text-primary)]"
+          value={layer.opacity}
+          onChange={(e) => onPatch(layer.key, { opacity: Number(e.target.value) })}
+        />
+      </div>
+
+      {layer.kind === 'vector' && (
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="text-text-quaternary">{localize('com_toolbox_map_style')}</span>
+          <input
+            type="color"
+            aria-label={localize('com_toolbox_map_style')}
+            className="size-5 cursor-pointer border-none bg-transparent p-0"
+            value={layer.color}
+            onChange={(e) => onPatch(layer.key, { color: e.target.value })}
+          />
+        </div>
+      )}
+
+      {(onFit || onRefresh || onRemove) && (
+        <div className="flex flex-col gap-1.5">
+          {onFit && (
+            <PanelAction
+              icon={<Crosshair className="size-3.5" aria-hidden="true" />}
+              onClick={onFit}
+            >
+              {localize('com_toolbox_map_fit')}
+            </PanelAction>
           )}
-          {(onFit || onRefresh || onRemove) && (
-            <div className="flex flex-wrap gap-1.5">
-              {onFit && (
-                <PanelAction
-                  icon={<Crosshair className="size-3.5" aria-hidden="true" />}
-                  onClick={onFit}
-                >
-                  {localize('com_toolbox_map_fit')}
-                </PanelAction>
-              )}
-              {onRefresh && (
-                <PanelAction
-                  icon={<RefreshCw className="size-3.5" aria-hidden="true" />}
-                  onClick={onRefresh}
-                >
-                  {localize('com_toolbox_map_refresh')}
-                </PanelAction>
-              )}
-              {onRemove && (
-                <PanelAction
-                  icon={<Trash2 className="size-3.5" aria-hidden="true" />}
-                  danger
-                  onClick={onRemove}
-                >
-                  {localize('com_toolbox_map_layer_remove')}
-                </PanelAction>
-              )}
-            </div>
+          {onRefresh && (
+            <PanelAction
+              icon={<RefreshCw className="size-3.5" aria-hidden="true" />}
+              onClick={onRefresh}
+            >
+              {localize('com_toolbox_map_refresh')}
+            </PanelAction>
+          )}
+          {onRemove && (
+            <PanelAction
+              icon={<Trash2 className="size-3.5" aria-hidden="true" />}
+              danger
+              onClick={onRemove}
+            >
+              {localize('com_toolbox_map_layer_remove')}
+            </PanelAction>
           )}
         </div>
       )}
-    </div>
+    </aside>
   );
 }
 
