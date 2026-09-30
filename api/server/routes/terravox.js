@@ -479,6 +479,18 @@ router.get(
     (req) => `/api/v1/admin/services/${encodeURIComponent(req.params.serviceId)}/datasources`,
   ),
 );
+
+/* Basemap group (contracts 2.20.0): ordered map list rendered as the stacked
+ * basemap in the map browser. Whole-group read/replace. */
+router.get(
+  '/admin/basemaps',
+  adminHandler(() => '/api/v1/admin/basemaps'),
+);
+router.put(
+  '/admin/basemaps',
+  jsonBody,
+  adminHandler(() => '/api/v1/admin/basemaps', { method: 'PUT', body: (req) => req.body }),
+);
 router.get(
   '/admin/handlers',
   adminHandler(() => '/api/v1/admin/handlers'),
