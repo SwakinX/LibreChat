@@ -437,6 +437,15 @@ router.post(
   jsonBody,
   adminHandler(() => '/api/v1/admin/services', { method: 'POST', body: (req) => req.body }),
 );
+/* iServer base-address discovery (2.18.0): enumerate REST map/data services. */
+router.post(
+  '/admin/services/discover',
+  jsonBody,
+  adminHandler(() => '/api/v1/admin/services/discover', {
+    method: 'POST',
+    body: (req) => req.body,
+  }),
+);
 router.patch(
   '/admin/services/:serviceId',
   jsonBody,
