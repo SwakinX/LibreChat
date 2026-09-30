@@ -47,7 +47,10 @@ type IClient = {
   supermap: {
     tiledMapLayer: (url: string) => L.TileLayer;
     /** 矢量瓦片图层（iServer MVT 服务，2.20.0）。 */
-    tiledVectorLayer: (url: string, options?: Record<string, unknown>) => L.TileLayer;
+    tiledVectorLayer: (
+      url: string,
+      options?: { format?: string; serverCartoCSSStyle?: boolean },
+    ) => L.TileLayer;
     initMap: (
       url: string,
       options?: { mapOptions?: Record<string, unknown>; layerOptions?: Record<string, unknown> },
@@ -74,12 +77,35 @@ type MapLayer = {
 /** 矢量地图服务判定（map-mvt-* 等服务名/URL 含 mvt 段，2.20.0）。 */
 const isMvtUrl = (url: string) => url.toLowerCase().includes('mvt');
 
-/** 按服务类型建瓦片图层：矢量地图服务 → iClient 矢量瓦片，其余 → 栅格切图。 */
+/** 矢量瓦片取数走 fetch：HTTPS 页面直连 http 内网地址会被 Chrome 混合内容
+ * 拦截（栅格 <img> 豁免、矢量不豁免），改经 nginx /iserver/ 同源反代取
+ * （上游即 iServer 实例，2026-09-30 实测）。 */
+function sameOriginUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.origin !== window.location.origin && parsed.pathname.startsWith('/iserver/')) {
+      return window.location.origin + parsed.pathname;
+    }
+  } catch {
+    /* 非 URL 形态（相对路径等）原样返回 */
+  }
+  return url;
+}
+
+/** 按服务类型建瓦片图层：矢量地图服务 → iClient 矢量瓦片（同源反代 +
+ * MVT 格式），其余 → 栅格切图（用户指定的浏览器直连策略，2026-09-29）。 */
 function makeTileLayer(url: string): L.TileLayer {
   const iclient = (L as unknown as IClient).supermap;
-  return isMvtUrl(url)
-    ? (iclient.tiledVectorLayer(url) as unknown as L.TileLayer)
-    : iclient.tiledMapLayer(url);
+  if (isMvtUrl(url)) {
+    return iclient.tiledVectorLayer(sameOriginUrl(url), {
+      /* iServer MVT 服务仅出 tileFeature.mvt（默认 JSON 返回 400，实测）；
+       * serverCartoCSSStyle 关掉：MVT 服务无 vectorstyles 端点（返回 HTML
+       * 错误页），开着会永远等不到出图回调，样式回落图层自带配置。 */
+      format: 'MVT',
+      serverCartoCSSStyle: false,
+    }) as unknown as L.TileLayer;
+  }
+  return iclient.tiledMapLayer(url);
 }
 
 /** 添加图层弹窗里的服务条目（注册表绑定按绑定 id 聚合出的数据服务）。 */
@@ -255,13 +281,22 @@ export default function MapBrowser() {
     }
     baseLayersRef.current.forEach((base, i) => {
       const name = basemapEntries[i]?.name ?? '';
-      if (baseVisibility[name] ?? true) {
-        if (!map.hasLayer(base)) {
-          base.addTo(map);
+      /* 单幅底图异常只影响自身（矢量瓦片容器异步就绪等），不能崩整个面板 */
+      try {
+        if (baseVisibility[name] ?? true) {
+          if (!map.hasLayer(base)) {
+            base.addTo(map);
+          }
+          try {
+            base.setOpacity(baseLayer?.opacity ?? 1);
+          } catch {
+            /* 容器未就绪时跳过，就绪后下次同步生效 */
+          }
+        } else if (map.hasLayer(base)) {
+          map.removeLayer(base);
         }
-        base.setOpacity(baseLayer?.opacity ?? 1);
-      } else if (map.hasLayer(base)) {
-        map.removeLayer(base);
+      } catch (error) {
+        console.warn('[MapBrowser] 底图同步失败:', name || i, error);
       }
     });
   }, [basemapEntries, baseVisibility, baseLayer, mapReady]);
@@ -284,20 +319,39 @@ export default function MapBrowser() {
       if (l.kind !== 'tiled' || !l.url) {
         return;
       }
-      let tile = inst.get(l.key) as L.TileLayer | undefined;
-      if (!tile) {
-        /* 矢量地图服务（map-mvt-*）以矢量瓦片方式出图（2.20.0）。 */
-        tile = makeTileLayer(l.url);
-        inst.set(l.key, tile);
-      }
-      if (l.visible) {
-        if (!map.hasLayer(tile)) {
-          tile.addTo(map);
+      /* 单个坏图层只影响自身：创建/挂载失败时移除实例记录，下次同步重建
+       * （2.20.0 实测：矢量瓦片图层异常曾致整面板白屏崩溃）。 */
+      try {
+        let tile = inst.get(l.key) as L.TileLayer | undefined;
+        if (!tile) {
+          /* 矢量地图服务（map-mvt-*）以矢量瓦片方式出图（2.20.0）。 */
+          tile = makeTileLayer(l.url);
+          inst.set(l.key, tile);
         }
-        tile.setOpacity(l.opacity);
-        tile.setZIndex(idx + 10);
-      } else if (map.hasLayer(tile)) {
-        map.removeLayer(tile);
+        if (l.visible) {
+          if (!map.hasLayer(tile)) {
+            tile.addTo(map);
+          }
+          try {
+            tile.setOpacity(l.opacity);
+            tile.setZIndex(idx + 10);
+          } catch {
+            /* 容器未就绪时跳过（矢量瓦片挂载初期），就绪后下次同步生效 */
+          }
+        } else if (map.hasLayer(tile)) {
+          map.removeLayer(tile);
+        }
+      } catch (error) {
+        console.warn('[MapBrowser] 图层同步失败:', l.name, error);
+        const bad = inst.get(l.key);
+        if (bad) {
+          try {
+            map.removeLayer(bad);
+          } catch {
+            /* 移除失败同样忽略 */
+          }
+          inst.delete(l.key);
+        }
       }
     });
   }, [layers, mapReady]);
