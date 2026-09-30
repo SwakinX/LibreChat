@@ -15,16 +15,18 @@ import { cn } from '~/utils';
 
 /** 分组键：管理端 display_group 优先（自由文本分组），缺省回退工具命名空间。 */
 const GROUP_LABEL_KEYS: Record<string, TranslationKeys> = {
+  ungrouped: 'com_toolbox_group_ungrouped',
   nextcloud: 'com_toolbox_group_nextcloud',
   spatial: 'com_toolbox_group_spatial',
   echo: 'com_toolbox_group_echo',
   demo: 'com_toolbox_group_demo',
 };
 
+const UNGROUPED = 'ungrouped';
+
 const groupOf = (tool: MergedTool): string =>
-  tool.manifest.display_group?.trim() ||
-  tool.manifest.tool_id.split('.')[0] ||
-  tool.manifest.tool_id;
+  /* 分组只来自管理端编排（2.17.0）：未归组的工具不再按 tool_id 前缀拆假分组 */
+  tool.manifest.display_group?.trim() || UNGROUPED;
 
 /**
  * Sidebar panel for /toolbox — the tool list the conversations list is on the

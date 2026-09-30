@@ -323,7 +323,39 @@ export async function fetchCloudFile(path: string): Promise<File> {
   const blob = (await request.get(`/api/terravox/files/download?path=${encodeURIComponent(path)}`, {
     responseType: 'blob',
   })) as Blob;
-  return new File([blob], path.split('/').pop() ?? 'file');
+  const name = path.split('/').pop() ?? 'file';
+  return new File([blob], name, { type: blob.type || mimeFromName(name) });
+}
+
+/** 兜底：网关未给出 Content-Type 时按扩展名猜（保持与浏览器附件管线一致）。 */
+export function mimeFromName(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  const table: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    bmp: 'image/bmp',
+    tif: 'image/tiff',
+    tiff: 'image/tiff',
+    pdf: 'application/pdf',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    csv: 'text/csv',
+    txt: 'text/plain',
+    md: 'text/markdown',
+    json: 'application/json',
+    geojson: 'application/geo+json',
+    zip: 'application/zip',
+    shp: 'application/octet-stream',
+  };
+  return table[ext] ?? 'application/octet-stream';
 }
 
 /** One-click save of textual tool output into the user's drive (2.16.0). */

@@ -21,7 +21,7 @@ import {
   RefreshCw,
   Trash2,
 } from 'lucide-react';
-import type { DragEvent, ReactNode } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import 'leaflet/dist/leaflet.css';
 import '@supermapgis/iclient-leaflet';
 import {
@@ -99,8 +99,8 @@ function mapBbox(map: L.Map): [number, number, number, number] {
 
 /**
  * 地图浏览器（?panel=map 独立面板，2.16.0）：GIS 风格图层树 + Leaflet 出图。
- * - 左侧「图层」树：拖拽改叠放次序（数组序 = 绘制序，后者在上），底图固定
- *   最底层不参与排序；显隐在行内，样式/透明度等在右侧属性面板；
+ * - 左侧「图层」树：拖拽把手改叠放次序（数组序 = 绘制序，后者在上），底图
+ *   固定最底层不参与排序；点行内嵌展开控制（透明度/着色/缩放到图层/重查/移除）；
  * - 右上角 +：二级菜单「添加图层」（先选注册的服务、再选数据集/地图）与
  *   「添加 REST 服务」（粘贴 iServer 链接识别临时图层）；
  * - 刷新按钮：按当前地图范围重查全部矢量图层；
@@ -129,8 +129,11 @@ export default function MapBrowser() {
   const instances = useRef<Map<string, L.Layer>>(new Map());
   const inFlight = useRef<Set<string>>(new Set());
   const fitted = useRef<Set<string>>(new Set());
-  const dragKey = useRef<string | null>(null);
   const [mapReady, setMapReady] = useState(0);
+  /* 行把手 Pointer 拖拽（不用 HTML5 DnD：拖影/命中受全局样式与浏览器差异影响）：
+   * 把手上按下即捕获指针，移动中命中哪行就交换到哪行，抬起结束。 */
+  const dragKeyRef = useRef<string | null>(null);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -404,6 +407,36 @@ export default function MapBrowser() {
     });
   };
 
+  const beginDrag = (e: ReactPointerEvent<HTMLSpanElement>, key: string) => {
+    if (e.button !== 0) {
+      return;
+    }
+    e.preventDefault();
+    const row = (e.currentTarget as HTMLElement).closest('[data-layer-row]');
+    row?.setPointerCapture(e.pointerId);
+    dragKeyRef.current = key;
+    setDraggingKey(key);
+  };
+
+  const onDragPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+    const key = dragKeyRef.current;
+    if (!key) {
+      return;
+    }
+    const hit = document
+      .elementFromPoint(e.clientX, e.clientY)
+      ?.closest<HTMLElement>('[data-layer-row]');
+    const target = hit?.dataset.layerRow;
+    if (target && target !== key) {
+      reorder(key, target);
+    }
+  };
+
+  const endDrag = () => {
+    dragKeyRef.current = null;
+    setDraggingKey(null);
+  };
+
   const removeLayer = (key: string) => {
     setLayers((prev) => prev.filter((l) => l.key !== key));
     setFeatures((prev) => {
@@ -510,34 +543,28 @@ export default function MapBrowser() {
       url: `${s.base_url}/iserver/services/${s.service_path}`,
     }));
 
-  const selectedLayer = layers.find((l) => l.key === selectedKey) ?? null;
   const overlayLayers = layers.filter((l) => l.kind !== 'base');
-  const fitSelected = () => {
+  /** 缩放到图层：矢量按要素范围 fitBounds（行内展开控制）。 */
+  const fitLayer = (l: MapLayer) => {
     const map = mapRef.current;
-    if (!map || !selectedLayer) {
+    if (!map || l.kind !== 'vector') {
       return;
     }
-    if (selectedLayer.kind === 'vector') {
-      const geo = instances.current.get(selectedLayer.key) as L.GeoJSON | undefined;
-      if (geo) {
-        const bounds = geo.getBounds();
-        if (bounds.isValid()) {
-          map.fitBounds(bounds, { padding: [16, 16], maxZoom: 16 });
-        }
+    const geo = instances.current.get(l.key) as L.GeoJSON | undefined;
+    if (geo) {
+      const bounds = geo.getBounds();
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [16, 16], maxZoom: 16 });
       }
     }
   };
-  const refreshSelected = () => {
+  /** 按当前地图范围重查该矢量图层。 */
+  const refreshLayer = (l: MapLayer) => {
     const map = mapRef.current;
-    if (!selectedLayer?.regId) {
+    if (!l.regId) {
       return;
     }
-    void fetchFeatures(
-      selectedLayer.key,
-      selectedLayer.regId,
-      false,
-      map ? mapBbox(map) : undefined,
-    );
+    void fetchFeatures(l.key, l.regId, false, map ? mapBbox(map) : undefined);
   };
 
   return (
@@ -606,30 +633,23 @@ export default function MapBrowser() {
 
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {notice && <p className="text-text-error px-1 pb-1 text-xs">{notice}</p>}
-          {/* 图层（顶部 = 最上层；拖拽改变绘制次序） */}
+          {/* 图层（顶部 = 最上层；拖拽把手改变绘制次序） */}
           {[...overlayLayers].reverse().map((l) => (
             <LayerTreeRow
               key={l.key}
               layer={l}
               selected={selectedKey === l.key}
-              onSelect={() => setSelectedKey(l.key)}
+              dragging={draggingKey === l.key}
+              onSelect={() => setSelectedKey((prev) => (prev === l.key ? null : l.key))}
               onToggleVisible={() => patchLayer(l.key, { visible: !l.visible })}
-              onDragStart={() => {
-                dragKey.current = l.key;
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (dragKey.current && dragKey.current !== l.key) {
-                  reorder(dragKey.current, l.key);
-                }
-                dragKey.current = null;
-              }}
-              onDragEnd={() => {
-                dragKey.current = null;
-              }}
+              onPatch={patchLayer}
+              onFit={l.kind === 'vector' ? () => fitLayer(l) : undefined}
+              onRefresh={l.regId ? () => refreshLayer(l) : undefined}
+              onRemove={() => removeLayer(l.key)}
+              dragHandle
+              onDragPointerDown={beginDrag}
+              onDragPointerMove={onDragPointerMove}
+              onDragPointerUp={endDrag}
             />
           ))}
           {overlayLayers.length === 0 && (
@@ -643,8 +663,12 @@ export default function MapBrowser() {
               <LayerTreeRow
                 layer={{ ...baseLayer, name: localize('com_toolbox_map_base') }}
                 selected={selectedKey === baseLayer.key}
-                onSelect={() => setSelectedKey(baseLayer.key)}
+                dragging={false}
+                onSelect={() =>
+                  setSelectedKey((prev) => (prev === baseLayer.key ? null : baseLayer.key))
+                }
                 onToggleVisible={() => patchLayer(baseLayer.key, { visible: !baseLayer.visible })}
+                onPatch={patchLayer}
               />
             </div>
           )}
@@ -682,20 +706,6 @@ export default function MapBrowser() {
         )}
       </main>
 
-      {/* ── 图层属性面板（选中图层时出现在右侧） ────────────────── */}
-      {selectedLayer && (
-        <PropsPanel
-          layer={selectedLayer}
-          onPatch={patchLayer}
-          onRemove={
-            selectedLayer.kind !== 'base' ? () => removeLayer(selectedLayer.key) : undefined
-          }
-          onFit={selectedLayer.kind === 'vector' ? fitSelected : undefined}
-          onRefresh={selectedLayer.kind === 'vector' ? refreshSelected : undefined}
-          onClose={() => setSelectedKey(null)}
-        />
-      )}
-
       <AddLayerDialog
         open={addOpen}
         mapServices={boundMaps}
@@ -716,185 +726,159 @@ export default function MapBrowser() {
   );
 }
 
-/** 图层树单行：显隐 + 名称（+ 拖拽手柄）。 */
+/** 图层树单行：显隐 + 名称 + 拖拽把手；选中行内嵌展开控制（透明度/着色/
+ * 缩放到图层/按范围重查/移除），不再依赖单独的属性面板。拖拽用 Pointer 事件
+ * 自实现：把手上按下捕获指针，移动中命中哪行就交换到哪行，抬起结束。 */
 function LayerTreeRow({
   layer,
   selected,
+  dragging,
   onSelect,
   onToggleVisible,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
+  onPatch,
+  onFit,
+  onRefresh,
+  onRemove,
+  dragHandle,
+  onDragPointerDown,
+  onDragPointerMove,
+  onDragPointerUp,
 }: {
   layer: MapLayer;
   selected: boolean;
+  dragging: boolean;
   onSelect: () => void;
   onToggleVisible: () => void;
-  onDragStart?: () => void;
-  onDragOver?: (e: DragEvent) => void;
-  onDrop?: (e: DragEvent) => void;
-  onDragEnd?: () => void;
-}) {
-  const localize = useLocalize();
-  const draggable = Boolean(onDragStart);
-  return (
-    <div
-      className={
-        'group flex items-center gap-1 rounded-md px-1 py-1 transition-colors ' +
-        (selected ? 'bg-surface-active-alt' : 'hover:bg-surface-active-alt')
-      }
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
-    >
-      {draggable ? (
-        <GripVertical
-          className="text-text-quaternary size-3 shrink-0 cursor-grab opacity-0 transition-opacity group-hover:opacity-100"
-          aria-hidden="true"
-        />
-      ) : (
-        <span className="w-3 shrink-0" aria-hidden="true" />
-      )}
-      <button
-        type="button"
-        title={
-          layer.visible
-            ? localize('com_toolbox_map_layer_hide')
-            : localize('com_toolbox_map_layer_show')
-        }
-        aria-label={
-          layer.visible
-            ? localize('com_toolbox_map_layer_hide')
-            : localize('com_toolbox_map_layer_show')
-        }
-        className="shrink-0 rounded p-0.5 text-text-secondary transition-colors hover:text-text-primary"
-        onClick={onToggleVisible}
-      >
-        {layer.visible ? (
-          <Eye className="size-3.5" aria-hidden="true" />
-        ) : (
-          <EyeOff className="text-text-quaternary size-3.5" aria-hidden="true" />
-        )}
-      </button>
-      <button
-        type="button"
-        className="min-w-0 flex-1 truncate rounded px-0.5 text-start"
-        title={layer.name}
-        onClick={onSelect}
-      >
-        {layer.name}
-      </button>
-    </div>
-  );
-}
-
-/** 右侧图层属性面板：显隐 / 透明度 /（矢量）着色、缩放到图层、按范围重查、移除。 */
-function PropsPanel({
-  layer,
-  onPatch,
-  onRemove,
-  onFit,
-  onRefresh,
-  onClose,
-}: {
-  layer: MapLayer;
   onPatch: (key: string, patch: Partial<MapLayer>) => void;
-  onRemove?: () => void;
   onFit?: () => void;
   onRefresh?: () => void;
-  onClose: () => void;
+  onRemove?: () => void;
+  dragHandle?: boolean;
+  onDragPointerDown?: (e: ReactPointerEvent<HTMLSpanElement>, key: string) => void;
+  onDragPointerMove?: (e: ReactPointerEvent<HTMLElement>) => void;
+  onDragPointerUp?: () => void;
 }) {
   const localize = useLocalize();
   return (
-    <aside className="flex w-60 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-border-medium p-3 text-sm">
-      <div className="flex items-center gap-1">
-        <h3 className="min-w-0 flex-1 truncate font-semibold" title={layer.name}>
-          {layer.name || localize('com_toolbox_map_base')}
-        </h3>
+    <div
+      data-layer-row={layer.key}
+      onPointerMove={dragHandle ? onDragPointerMove : undefined}
+      onPointerUp={dragHandle ? onDragPointerUp : undefined}
+      onPointerCancel={dragHandle ? onDragPointerUp : undefined}
+    >
+      <div
+        className={
+          'group flex items-center gap-1 rounded-md px-1 py-1 transition-colors ' +
+          (selected || dragging ? 'bg-surface-active-alt' : 'hover:bg-surface-active-alt') +
+          (dragging ? ' ring-1 ring-border-medium' : '')
+        }
+      >
+        {dragHandle ? (
+          <span
+            data-drag-handle
+            title={localize('com_toolbox_map_drag_handle')}
+            aria-label={localize('com_toolbox_map_drag_handle')}
+            className="text-text-quaternary shrink-0 cursor-grab touch-none rounded p-0.5 opacity-0 transition-opacity hover:text-text-primary active:cursor-grabbing group-hover:opacity-100"
+            onPointerDown={(e) => onDragPointerDown?.(e, layer.key)}
+          >
+            <GripVertical className="size-3" aria-hidden="true" />
+          </span>
+        ) : (
+          <span className="w-4 shrink-0" aria-hidden="true" />
+        )}
         <button
           type="button"
-          className="text-text-quaternary rounded p-0.5 transition-colors hover:text-text-primary"
-          aria-label={localize('com_ui_close')}
-          onClick={onClose}
+          title={
+            layer.visible
+              ? localize('com_toolbox_map_layer_hide')
+              : localize('com_toolbox_map_layer_show')
+          }
+          aria-label={
+            layer.visible
+              ? localize('com_toolbox_map_layer_hide')
+              : localize('com_toolbox_map_layer_show')
+          }
+          className="shrink-0 rounded p-0.5 text-text-secondary transition-colors hover:text-text-primary"
+          onClick={onToggleVisible}
         >
-          ×
+          {layer.visible ? (
+            <Eye className="size-3.5" aria-hidden="true" />
+          ) : (
+            <EyeOff className="text-text-quaternary size-3.5" aria-hidden="true" />
+          )}
+        </button>
+        <button
+          type="button"
+          className="min-w-0 flex-1 truncate rounded px-0.5 text-start"
+          title={layer.name}
+          aria-expanded={selected}
+          onClick={onSelect}
+        >
+          {layer.name}
         </button>
       </div>
-
-      <label className="flex items-center justify-between gap-2 text-xs">
-        <span>
-          {layer.visible
-            ? localize('com_toolbox_map_layer_hide')
-            : localize('com_toolbox_map_layer_show')}
-        </span>
-        <input
-          type="checkbox"
-          className="accent-[var(--text-primary)]"
-          checked={layer.visible}
-          onChange={() => onPatch(layer.key, { visible: !layer.visible })}
-        />
-      </label>
-
-      <div>
-        <p className="text-text-quaternary mb-1 text-xs">
-          {localize('com_toolbox_map_style')} · {Math.round(layer.opacity * 100)}%
-        </p>
-        <input
-          type="range"
-          min={0.1}
-          max={1}
-          step={0.05}
-          aria-label={`${layer.name} opacity`}
-          className="h-1 w-full accent-[var(--text-primary)]"
-          value={layer.opacity}
-          onChange={(e) => onPatch(layer.key, { opacity: Number(e.target.value) })}
-        />
-      </div>
-
-      {layer.kind === 'vector' && (
-        <>
-          <div className="flex items-center justify-between gap-2 text-xs">
-            <span className="text-text-quaternary">{localize('com_toolbox_map_style')}</span>
+      {/* 行内展开控制：透明度 +（矢量）着色/缩放/重查 + 移除 */}
+      {selected && (
+        <div className="mb-1 mt-0.5 flex flex-col gap-2 rounded-md border border-border-light p-2">
+          <div>
+            <p className="text-text-quaternary mb-1 text-xs">
+              {localize('com_toolbox_map_opacity')} · {Math.round(layer.opacity * 100)}%
+            </p>
             <input
-              type="color"
-              aria-label={localize('com_toolbox_map_style')}
-              className="size-5 cursor-pointer border-none bg-transparent p-0"
-              value={layer.color}
-              onChange={(e) => onPatch(layer.key, { color: e.target.value })}
+              type="range"
+              min={0.1}
+              max={1}
+              step={0.05}
+              aria-label={`${layer.name} opacity`}
+              className="h-1 w-full accent-[var(--text-primary)]"
+              value={layer.opacity}
+              onChange={(e) => onPatch(layer.key, { opacity: Number(e.target.value) })}
             />
           </div>
-          {onFit && (
-            <PanelAction
-              icon={<Crosshair className="size-3.5" aria-hidden="true" />}
-              onClick={onFit}
-            >
-              {localize('com_toolbox_map_fit')}
-            </PanelAction>
+          {layer.kind === 'vector' && (
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-text-quaternary">{localize('com_toolbox_map_style')}</span>
+              <input
+                type="color"
+                aria-label={localize('com_toolbox_map_style')}
+                className="size-5 cursor-pointer border-none bg-transparent p-0"
+                value={layer.color}
+                onChange={(e) => onPatch(layer.key, { color: e.target.value })}
+              />
+            </div>
           )}
-          {onRefresh && (
-            <PanelAction
-              icon={<RefreshCw className="size-3.5" aria-hidden="true" />}
-              onClick={onRefresh}
-            >
-              {localize('com_toolbox_map_refresh')}
-            </PanelAction>
+          {(onFit || onRefresh || onRemove) && (
+            <div className="flex flex-wrap gap-1.5">
+              {onFit && (
+                <PanelAction
+                  icon={<Crosshair className="size-3.5" aria-hidden="true" />}
+                  onClick={onFit}
+                >
+                  {localize('com_toolbox_map_fit')}
+                </PanelAction>
+              )}
+              {onRefresh && (
+                <PanelAction
+                  icon={<RefreshCw className="size-3.5" aria-hidden="true" />}
+                  onClick={onRefresh}
+                >
+                  {localize('com_toolbox_map_refresh')}
+                </PanelAction>
+              )}
+              {onRemove && (
+                <PanelAction
+                  icon={<Trash2 className="size-3.5" aria-hidden="true" />}
+                  danger
+                  onClick={onRemove}
+                >
+                  {localize('com_toolbox_map_layer_remove')}
+                </PanelAction>
+              )}
+            </div>
           )}
-        </>
+        </div>
       )}
-
-      {onRemove && (
-        <PanelAction
-          icon={<Trash2 className="size-3.5" aria-hidden="true" />}
-          danger
-          onClick={onRemove}
-        >
-          {localize('com_toolbox_map_layer_remove')}
-        </PanelAction>
-      )}
-    </aside>
+    </div>
   );
 }
 

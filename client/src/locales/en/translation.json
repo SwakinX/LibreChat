@@ -3137,5 +3137,8 @@
   "com_toolbox_widget_pick_file": "Choose file…",
   "com_toolbox_widget_change_file": "Change file",
   "com_toolbox_widget_no_file": "No file selected",
-  "com_toolbox_file_download": "Download"
+  "com_toolbox_file_download": "Download",
+  "com_toolbox_group_ungrouped": "Ungrouped",
+  "com_toolbox_map_opacity": "Opacity",
+  "com_toolbox_map_drag_handle": "Drag to reorder layers"
 }

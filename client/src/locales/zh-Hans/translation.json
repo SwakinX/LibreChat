@@ -3144,5 +3144,8 @@
   "com_ui_memory_deleted_items": "已删除的记忆",
   "com_ui_memory_updated_items": "已更新的记忆",
   "com_ui_save_submit": "保存并提交",
-  "com_ui_web_search_api_subtitle": "搜索网络以获取最新信息"
+  "com_ui_web_search_api_subtitle": "搜索网络以获取最新信息",
+  "com_toolbox_group_ungrouped": "未分组",
+  "com_toolbox_map_opacity": "透明度",
+  "com_toolbox_map_drag_handle": "按住拖动调整图层顺序"
 }

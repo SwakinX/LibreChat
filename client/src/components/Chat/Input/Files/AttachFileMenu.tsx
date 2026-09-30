@@ -455,13 +455,6 @@ const AttachFileMenu = ({
           onClose={() => setIsCloudDialogOpen(false)}
           onPick={(picked) => void handleCloudFilesSelected(picked)}
         />
-        <CloudPickerDialog
-          open={isCloudDialogOpen}
-          mode="file"
-          multi
-          onClose={() => setIsCloudDialogOpen(false)}
-          onPick={(picked) => void handleCloudFilesSelected(picked)}
-        />
       </>
     );
   }
