@@ -413,7 +413,11 @@ export default function MapBrowser() {
     }
     e.preventDefault();
     const row = (e.currentTarget as HTMLElement).closest('[data-layer-row]');
-    row?.setPointerCapture(e.pointerId);
+    try {
+      row?.setPointerCapture(e.pointerId);
+    } catch {
+      /* 指针未激活（合成事件等）：不捕获也能拖，只是移出行后丢事件 */
+    }
     dragKeyRef.current = key;
     setDraggingKey(key);
   };
