@@ -34,7 +34,9 @@ import {
   useExecuteTool,
   useMapConfig,
   useResolveService,
+  useServiceMaps,
   useServices,
+  type BindingMap,
   type ResolveResult,
   type ServiceBinding,
 } from './api';
@@ -73,7 +75,7 @@ type DataService = {
   label: string;
   datasets: { name: string; regId: string }[];
 };
-type MapServiceEntry = { kind: 'map'; label: string; url: string };
+type MapServiceEntry = { kind: 'map'; bindingId: string; label: string; rootUrl: string };
 type AddTarget = { kind: 'data'; entry: DataService } | MapServiceEntry;
 
 const STORAGE_KEY = 'terravox.mapbrowser.layers.v1';
@@ -554,12 +556,22 @@ export default function MapBrowser() {
   }, [regOptions]);
 
   const services: ServiceBinding[] = svcData?.services ?? [];
+  /* 地图绑定 = 服务级（2.18.0）：具体地图在添加图层弹窗内列出并多选导入 */
+  const mapsRootOf = (servicePath: string) => {
+    const p = `iserver/services/${servicePath.replace(/^\/+/, '')}`;
+    const k = p.indexOf('/rest/maps/');
+    if (k >= 0) {
+      return p.slice(0, k + '/rest/maps'.length);
+    }
+    return p.endsWith('/rest/maps') ? p : `${p}/rest/maps`;
+  };
   const boundMaps: MapServiceEntry[] = services
     .filter((s) => s.type === 'iserver_map' && s.status === 'available')
     .map((s) => ({
       kind: 'map' as const,
+      bindingId: s.id,
       label: s.name,
-      url: `${s.base_url}/iserver/services/${s.service_path}`,
+      rootUrl: `${s.base_url.replace(/\/+$/, '')}/${mapsRootOf(s.service_path)}`,
     }));
 
   /** 图层右键菜单项（可扩展框架：需要新操作就在数组里追加一项）。 */
@@ -1107,7 +1119,8 @@ function PanelAction({
   );
 }
 
-/** 添加图层弹窗：左列选服务（注册的地图/数据绑定），右列选该服务的地图或数据集。 */
+/** 添加图层弹窗：左列选服务（注册的地图/数据绑定），右列多选该服务下的
+ * 地图/数据集，点「导入所选」批量入图（2.18.0）。 */
 function AddLayerDialog({
   open,
   mapServices,
@@ -1125,17 +1138,47 @@ function AddLayerDialog({
 }) {
   const localize = useLocalize();
   const [target, setTarget] = useState<AddTarget | null>(null);
+  const [pickedMaps, setPickedMaps] = useState<string[]>([]);
+  const [pickedVectors, setPickedVectors] = useState<string[]>([]);
   const [lastOpen, setLastOpen] = useState(false);
+  const serviceId = target?.kind === 'map' ? target.bindingId : null;
+  const mapsQuery = useServiceMaps(serviceId, open);
   /* 打开瞬间复位选择（渲染期受控复位，同 PastedTextDialog）。 */
   if (open !== lastOpen) {
     setLastOpen(open);
     if (open) {
       setTarget(null);
+      setPickedMaps([]);
+      setPickedVectors([]);
     }
   }
 
   const rowCls =
     'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-surface-active-alt';
+  const check =
+    'flex size-4 shrink-0 items-center justify-center rounded border border-border-medium';
+
+  const toggle = (list: string[], key: string) =>
+    list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
+
+  const importPicked = () => {
+    if (target?.kind === 'map') {
+      for (const m of mapsQuery.data?.maps ?? []) {
+        if (!pickedMaps.includes(m.name)) {
+          continue;
+        }
+        onAddMap(m.name, m.path || target.rootUrl + '/' + m.name);
+      }
+    } else if (target?.kind === 'data') {
+      for (const dataset of target.entry.datasets) {
+        if (pickedVectors.includes(dataset.regId)) {
+          onAddVector(dataset.name, dataset.regId);
+        }
+      }
+    }
+    onClose();
+  };
+  const pickedCount = target?.kind === 'map' ? pickedMaps.length : pickedVectors.length;
 
   return (
     <OGDialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -1151,15 +1194,18 @@ function AddLayerDialog({
             <div className="max-h-[50vh] min-h-40 overflow-y-auto rounded-lg border border-border-medium p-1">
               {mapServices.map((svc) => (
                 <button
-                  key={svc.url}
+                  key={svc.bindingId}
                   type="button"
                   className={
                     rowCls +
-                    (target?.kind === 'map' && target.url === svc.url
+                    (target?.kind === 'map' && target.bindingId === svc.bindingId
                       ? ' bg-surface-active-alt'
                       : '')
                   }
-                  onClick={() => setTarget(svc)}
+                  onClick={() => {
+                    setTarget(svc);
+                    setPickedMaps([]);
+                  }}
                 >
                   <Layers className="size-4 shrink-0 text-text-tertiary" aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate" title={svc.label}>
@@ -1179,7 +1225,10 @@ function AddLayerDialog({
                     key={entry.bindingId}
                     type="button"
                     className={rowCls + (active ? ' bg-surface-active-alt' : '')}
-                    onClick={() => setTarget({ kind: 'data', entry })}
+                    onClick={() => {
+                      setTarget({ kind: 'data', entry });
+                      setPickedVectors([]);
+                    }}
                   >
                     <FolderSearch
                       className="size-4 shrink-0 text-text-tertiary"
@@ -1206,55 +1255,108 @@ function AddLayerDialog({
             <p className="text-text-quaternary text-xs font-semibold uppercase">
               {localize('com_toolbox_map_pick_layer')}
             </p>
-            <div className="max-h-[50vh] min-h-40 overflow-y-auto rounded-lg border border-border-medium p-1">
+            <div className="max-h-[40vh] min-h-40 overflow-y-auto rounded-lg border border-border-medium p-1">
               {!target && (
                 <p className="p-3 text-center text-xs text-text-tertiary">
                   {localize('com_toolbox_map_service')}
                 </p>
               )}
               {target?.kind === 'map' && (
-                <button
-                  type="button"
-                  className={rowCls}
-                  onClick={() => {
-                    onAddMap(target.label, target.url);
-                    onClose();
-                  }}
-                >
-                  <Layers className="size-4 shrink-0 text-text-tertiary" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{target.label}</span>
-                </button>
+                <>
+                  {mapsQuery.isLoading && (
+                    <p className="p-3 text-center text-xs text-text-tertiary">
+                      {localize('com_toolbox_cloud_loading')}
+                    </p>
+                  )}
+                  {mapsQuery.isError && (
+                    <p className="text-text-error p-3 text-center text-xs">
+                      {(mapsQuery.error as Error).message}
+                    </p>
+                  )}
+                  {(mapsQuery.data?.maps ?? []).map((m: BindingMap) => {
+                    const picked = pickedMaps.includes(m.name);
+                    return (
+                      <button
+                        key={m.name}
+                        type="button"
+                        aria-pressed={picked}
+                        className={rowCls}
+                        onClick={() => setPickedMaps((prev) => toggle(prev, m.name))}
+                      >
+                        <span
+                          className={check + (picked ? ' border-indigo-500 bg-indigo-500' : '')}
+                          aria-hidden="true"
+                        >
+                          {picked && <span className="size-2 rounded-sm bg-white" />}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate" title={m.name}>
+                          {m.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {!mapsQuery.isLoading && (mapsQuery.data?.maps ?? []).length === 0 && (
+                    <p className="p-3 text-center text-xs text-text-tertiary">
+                      {localize('com_toolbox_cloud_empty')}
+                    </p>
+                  )}
+                </>
               )}
-              {target?.kind === 'data' &&
-                target.entry.datasets.map((dataset) => (
-                  <button
-                    key={dataset.regId}
-                    type="button"
-                    className={rowCls}
-                    onClick={() => {
-                      onAddVector(dataset.name, dataset.regId);
-                      onClose();
-                    }}
-                  >
-                    <span className="min-w-0 flex-1 truncate" title={dataset.name}>
-                      {dataset.name}
-                    </span>
-                  </button>
-                ))}
+              {target?.kind === 'data' && (
+                <>
+                  {target.entry.datasets.length === 0 && (
+                    <p className="p-3 text-center text-xs text-text-tertiary">
+                      {localize('com_toolbox_cloud_empty')}
+                    </p>
+                  )}
+                  {target.entry.datasets.map((dataset) => {
+                    const picked = pickedVectors.includes(dataset.regId);
+                    return (
+                      <button
+                        key={dataset.regId}
+                        type="button"
+                        aria-pressed={picked}
+                        className={rowCls}
+                        onClick={() => setPickedVectors((prev) => toggle(prev, dataset.regId))}
+                      >
+                        <span
+                          className={check + (picked ? ' border-indigo-500 bg-indigo-500' : '')}
+                          aria-hidden="true"
+                        >
+                          {picked && <span className="size-2 rounded-sm bg-white" />}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate" title={dataset.name}>
+                          {dataset.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </>
+              )}
             </div>
           </div>
         </div>
-        <div className="flex justify-end pt-2">
-          <Button variant="outline" onClick={onClose}>
-            {localize('com_ui_cancel')}
-          </Button>
+        <div className="flex items-center justify-between gap-2 pt-2">
+          <span className="text-xs text-text-tertiary">
+            {pickedCount > 0
+              ? localize('com_toolbox_map_picked_count', { n: String(pickedCount) })
+              : ''}
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>
+              {localize('com_ui_cancel')}
+            </Button>
+            <Button variant="default" disabled={pickedCount === 0} onClick={importPicked}>
+              {localize('com_toolbox_map_import_picked')}
+            </Button>
+          </div>
         </div>
       </OGDialogContent>
     </OGDialog>
   );
 }
 
-/** 添加 REST 服务弹窗：粘贴 iServer 链接 → /services/resolve 识别 → 逐个加层。 */
+/** 添加 REST 服务弹窗：粘贴 iServer 链接 → /services/resolve 识别 → 多选导入。 */
 function ResolveDialog({
   open,
   resolve,
@@ -1333,7 +1435,8 @@ function ResolveDialog({
   );
 }
 
-/** 识别结果卡：地图服务 → 加瓦片层；数据服务 → 按数据源列数据集逐个加矢量层。 */
+/** 识别结果卡（2.18.0 直连版）：完整链接解析后直接列出可加图层，
+ * 多选后一次导入——不再让用户分类型/逐个点。 */
 function ResolveCard({
   resolved,
   onAddMap,
@@ -1344,6 +1447,34 @@ function ResolveCard({
   onAddVector: (name: string, regId: string) => void;
 }) {
   const localize = useLocalize();
+  const isMap = resolved.type === 'iserver_map';
+  /* 地图：draft.maps = 服务内全部地图（单地图链接时仅 1 项）。 */
+  const mapItems = (resolved.draft.maps ?? []).map((name) => {
+    const rootUrl =
+      resolved.base.replace(/\/+$/, '') +
+      '/iserver/services/' +
+      resolved.service_path.replace(/^\/+/, '').replace(/(\/rest\/maps)\/.*/, '$1');
+    return { name, url: rootUrl + '/' + name };
+  });
+  /* 数据：按数据源展开全部数据集（四段临时 regId）。 */
+  const hostTag = resolved.base.replace(/^[a-z]+:\/\//, '');
+  const service = resolved.service_path.split('/rest/data')[0];
+  const vectorItems = (resolved.draft.datasources ?? []).flatMap((ds) =>
+    (resolved.draft.datasets?.[ds] ?? []).map((name) => ({
+      key: `${hostTag}|${service}|${ds}|${name}`,
+      name,
+      ds,
+    })),
+  );
+  const items = isMap ? mapItems.map((m) => m.name) : vectorItems.map((v) => v.key);
+  const [picked, setPicked] = useState<string[]>(items);
+  const [lastKey, setLastKey] = useState('');
+  const key = `${resolved.type}:${resolved.service_path}`;
+  if (key !== lastKey) {
+    setLastKey(key);
+    setPicked(items);
+  }
+
   if (resolved.status !== 'available') {
     return (
       <p className="text-text-error rounded-md border border-border-medium px-2 py-1.5 text-xs">
@@ -1351,45 +1482,94 @@ function ResolveCard({
       </p>
     );
   }
-  if (resolved.type === 'iserver_map') {
-    const serviceUrl = `${resolved.base}/iserver/services/${resolved.service_path}`;
-    const name = resolved.draft.maps?.[0] || resolved.service_path.split('/').pop() || serviceUrl;
-    return (
-      <button
-        type="button"
-        className="flex w-full items-center gap-1.5 rounded-md border border-border-medium px-2 py-1.5 text-start text-xs transition-colors hover:bg-surface-active-alt"
-        onClick={() => onAddMap(name, serviceUrl)}
-      >
-        <span className="min-w-0 flex-1 truncate" title={resolved.detail}>
-          {name}
-        </span>
-        {localize('com_toolbox_map_add')}
-      </button>
-    );
-  }
-  const hostTag = resolved.base.replace(/^[a-z]+:\/\//, '');
-  const service = resolved.service_path.split('/rest/data')[0];
-  const datasets = resolved.draft.datasets ?? {};
+
+  const rowCls =
+    'flex w-full items-center gap-2 rounded px-1.5 py-1 text-start text-xs transition-colors hover:bg-surface-active-alt';
+  const check =
+    'flex size-3.5 shrink-0 items-center justify-center rounded border border-border-medium';
+  const toggle = (k: string) =>
+    setPicked((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
+  const importPicked = () => {
+    if (isMap) {
+      for (const m of mapItems) {
+        if (picked.includes(m.name)) {
+          onAddMap(m.name, m.url);
+        }
+      }
+    } else {
+      for (const v of vectorItems) {
+        if (picked.includes(v.key)) {
+          onAddVector(v.name, v.key);
+        }
+      }
+    }
+  };
+  const importLabel = localize('com_toolbox_map_import_picked');
+
   return (
-    <div className="flex max-h-[40vh] flex-col gap-1 overflow-y-auto rounded-md border border-border-medium px-2 py-1.5">
-      {resolved.draft.datasources?.map((ds) => (
-        <div key={ds}>
-          <p className="text-text-quaternary text-[10px] uppercase">{ds}</p>
-          {(datasets[ds] ?? []).map((name) => (
-            <button
-              key={name}
-              type="button"
-              className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-start text-xs transition-colors hover:bg-surface-active-alt"
-              onClick={() => onAddVector(name, `${hostTag}|${service}|${ds}|${name}`)}
-            >
-              <span className="min-w-0 flex-1 truncate" title={name}>
-                {name}
-              </span>
-              {localize('com_toolbox_map_add')}
-            </button>
-          ))}
-        </div>
-      ))}
+    <div className="flex flex-col gap-2">
+      <div className="max-h-[40vh] overflow-y-auto rounded-md border border-border-medium px-2 py-1.5">
+        {items.length === 0 && (
+          <p className="p-2 text-center text-xs text-text-tertiary">
+            {localize('com_toolbox_cloud_empty')}
+          </p>
+        )}
+        {isMap &&
+          mapItems.map((m) => {
+            const pickedOn = picked.includes(m.name);
+            return (
+              <button
+                key={m.name}
+                type="button"
+                aria-pressed={pickedOn}
+                className={rowCls}
+                onClick={() => toggle(m.name)}
+              >
+                <span
+                  className={check + (pickedOn ? ' border-indigo-500 bg-indigo-500' : '')}
+                  aria-hidden="true"
+                >
+                  {pickedOn && <span className="size-2 rounded-sm bg-white" />}
+                </span>
+                <span className="min-w-0 flex-1 truncate" title={m.name}>
+                  {m.name}
+                </span>
+              </button>
+            );
+          })}
+        {!isMap &&
+          vectorItems.map((v) => {
+            const pickedOn = picked.includes(v.key);
+            return (
+              <button
+                key={v.key}
+                type="button"
+                aria-pressed={pickedOn}
+                className={rowCls}
+                onClick={() => toggle(v.key)}
+              >
+                <span
+                  className={check + (pickedOn ? ' border-indigo-500 bg-indigo-500' : '')}
+                  aria-hidden="true"
+                >
+                  {pickedOn && <span className="size-2 rounded-sm bg-white" />}
+                </span>
+                <span className="text-text-quaternary w-24 shrink-0 truncate" title={v.ds}>
+                  {v.ds}
+                </span>
+                <span className="min-w-0 flex-1 truncate" title={v.name}>
+                  {v.name}
+                </span>
+              </button>
+            );
+          })}
+      </div>
+      <div className="flex justify-end">
+        <Button variant="default" disabled={picked.length === 0} onClick={importPicked}>
+          {importLabel}
+          {picked.length > 0 ? ` (${picked.length})` : ''}
+        </Button>
+      </div>
     </div>
   );
 }

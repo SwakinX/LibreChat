@@ -274,6 +274,13 @@ router.get(
   handler(() => '/api/v1/services'),
 );
 
+/* Maps inside a service-level map binding (2.18.0): the add-layer dialog
+ * lists these for multi-select import. */
+router.get(
+  '/services/:serviceId/maps',
+  handler((req) => `/api/v1/services/${encodeURIComponent(req.params.serviceId)}/maps`),
+);
+
 /* Direct-add temp layers (2.16.0): resolve a pasted iServer REST service URL into
  * type + candidates. Read-only probe; nothing is written to the registry. */
 router.post(

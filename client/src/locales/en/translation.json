@@ -3146,5 +3146,7 @@
   "com_toolbox_map_prop_type": "Type",
   "com_toolbox_map_prop_features": "Features",
   "com_toolbox_map_kind_vector": "Vector layer",
-  "com_toolbox_map_kind_tiled": "Tile layer"
+  "com_toolbox_map_kind_tiled": "Tile layer",
+  "com_toolbox_map_import_picked": "Import selected",
+  "com_toolbox_map_picked_count": "{n} selected"
 }

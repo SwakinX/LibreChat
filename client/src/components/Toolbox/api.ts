@@ -276,6 +276,20 @@ export const useServices = () =>
     staleTime: 60_000,
   });
 
+/** 地图服务绑定内的地图清单（2.18.0 添加图层多选导入）。 */
+export type BindingMap = { name: string; path: string };
+
+export const useServiceMaps = (serviceId: string | null, enabled: boolean) =>
+  useQuery({
+    queryKey: ['terravox', 'service-maps', serviceId],
+    queryFn: () =>
+      get<{ maps: BindingMap[] }>(
+        `/api/terravox/services/${encodeURIComponent(String(serviceId))}/maps`,
+      ),
+    enabled: enabled && !!serviceId,
+    staleTime: 5 * 60_000,
+  });
+
 export type ResolveResult = {
   type: 'iserver_map' | 'iserver_data';
   base: string;

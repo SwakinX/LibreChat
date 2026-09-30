@@ -3153,5 +3153,7 @@
   "com_toolbox_map_prop_type": "类型",
   "com_toolbox_map_prop_features": "要素数",
   "com_toolbox_map_kind_vector": "矢量图层",
-  "com_toolbox_map_kind_tiled": "瓦片图层"
+  "com_toolbox_map_kind_tiled": "瓦片图层",
+  "com_toolbox_map_import_picked": "导入所选",
+  "com_toolbox_map_picked_count": "已选 {n} 项"
 }
