@@ -46,6 +46,8 @@ import { useLocalize } from '~/hooks';
 type IClient = {
   supermap: {
     tiledMapLayer: (url: string) => L.TileLayer;
+    /** 矢量瓦片图层（iServer MVT 服务，2.20.0）。 */
+    tiledVectorLayer: (url: string, options?: Record<string, unknown>) => L.TileLayer;
     initMap: (
       url: string,
       options?: { mapOptions?: Record<string, unknown>; layerOptions?: Record<string, unknown> },
@@ -68,6 +70,17 @@ type MapLayer = {
   opacity: number;
   color: string;
 };
+
+/** 矢量地图服务判定（map-mvt-* 等服务名/URL 含 mvt 段，2.20.0）。 */
+const isMvtUrl = (url: string) => url.toLowerCase().includes('mvt');
+
+/** 按服务类型建瓦片图层：矢量地图服务 → iClient 矢量瓦片，其余 → 栅格切图。 */
+function makeTileLayer(url: string): L.TileLayer {
+  const iclient = (L as unknown as IClient).supermap;
+  return isMvtUrl(url)
+    ? (iclient.tiledVectorLayer(url) as unknown as L.TileLayer)
+    : iclient.tiledMapLayer(url);
+}
 
 /** 添加图层弹窗里的服务条目（注册表绑定按绑定 id 聚合出的数据服务）。 */
 type DataService = {
@@ -152,6 +165,14 @@ export default function MapBrowser() {
     }
   }, [layers]);
 
+  /* 底图组条目（2.20.0）：basemaps 数组优先，env 回落单幅；树按此分幅显示。 */
+  const basemapEntries = useMemo(() => {
+    if (config?.basemaps?.length) {
+      return config.basemaps;
+    }
+    return config?.map_url ? [{ name: '', url: config.map_url }] : [];
+  }, [config]);
+
   /* 地图初始化：initMap 读服务切图方案（4490 自动注册），失败回退度 CRS。 */
   useEffect(() => {
     if (!config?.configured || !containerRef.current || mapRef.current) {
@@ -170,11 +191,7 @@ export default function MapBrowser() {
     const degreeCrs = config.epsg === 4326 || config.epsg === 4490 ? L.CRS.EPSG4326 : undefined;
 
     /* 底图组（2.19.0）：按 basemaps 数组序叠放（前者在下）；env 回落时单幅。 */
-    const basemapUrls = (
-      config.basemaps?.length ? config.basemaps : [{ name: '', url: config.map_url }]
-    )
-      .map((b) => b.url)
-      .filter(Boolean);
+    const basemapUrls = basemapEntries.map((b) => b.url).filter(Boolean);
 
     const fallbackInit = () => {
       const map = L.map(el, {
@@ -182,13 +199,17 @@ export default function MapBrowser() {
         ...view,
         ...(degreeCrs ? { crs: degreeCrs } : {}),
       });
-      baseLayersRef.current = basemapUrls.map((url) => iclient.tiledMapLayer(url).addTo(map));
+      baseLayersRef.current = basemapUrls.map((url) => makeTileLayer(url).addTo(map));
       return map;
     };
 
     (async () => {
       let map: L.Map;
       try {
+        if (isMvtUrl(basemapUrls[0] ?? '')) {
+          // 首幅是矢量瓦片服务：initMap 只识别栅格切图协议，直接走 fallback
+          throw new Error('mvt-basemap');
+        }
         el.id = 'map'; // initMap 以固定 id 建图（首幅底图走官方切图方案）
         const created = await iclient.initMap(basemapUrls[0], {
           mapOptions: { zoomControl: true, ...view },
@@ -196,7 +217,7 @@ export default function MapBrowser() {
         map = created.map;
         baseLayersRef.current = [
           created.layer,
-          ...basemapUrls.slice(1).map((url) => iclient.tiledMapLayer(url).addTo(map)),
+          ...basemapUrls.slice(1).map((url) => makeTileLayer(url).addTo(map)),
         ];
       } catch {
         delete (el as unknown as { _leaflet_id?: number })._leaflet_id;
@@ -221,27 +242,29 @@ export default function MapBrowser() {
       inst.clear();
       fittedSet.clear();
     };
-  }, [config]);
+  }, [config, basemapEntries]);
 
   const baseLayer = layers.find((l) => l.kind === 'base');
+  /* 底图分幅显隐（2.20.0）：每幅独立（未记录默认可见）；透明度仍整组统一。 */
+  const [baseVisibility, setBaseVisibility] = useState<Record<string, boolean>>({});
 
-  /* 底图组显隐/透明度（整组统一）。 */
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !baseLayer) {
+    if (!map) {
       return;
     }
-    for (const base of baseLayersRef.current) {
-      if (baseLayer.visible) {
+    baseLayersRef.current.forEach((base, i) => {
+      const name = basemapEntries[i]?.name ?? '';
+      if (baseVisibility[name] ?? true) {
         if (!map.hasLayer(base)) {
           base.addTo(map);
         }
-        base.setOpacity(baseLayer.opacity);
+        base.setOpacity(baseLayer?.opacity ?? 1);
       } else if (map.hasLayer(base)) {
         map.removeLayer(base);
       }
-    }
-  }, [baseLayer, mapReady]);
+    });
+  }, [basemapEntries, baseVisibility, baseLayer, mapReady]);
 
   /* 瓦片图层同步：增删/显隐/透明度/叠放次序（数组后者在上）。 */
   useEffect(() => {
@@ -263,7 +286,8 @@ export default function MapBrowser() {
       }
       let tile = inst.get(l.key) as L.TileLayer | undefined;
       if (!tile) {
-        tile = (L as unknown as IClient).supermap.tiledMapLayer(l.url);
+        /* 矢量地图服务（map-mvt-*）以矢量瓦片方式出图（2.20.0）。 */
+        tile = makeTileLayer(l.url);
         inst.set(l.key, tile);
       }
       if (l.visible) {
@@ -742,22 +766,36 @@ export default function MapBrowser() {
               {localize('com_toolbox_map_empty_layers')}
             </p>
           )}
-          {/* 底图（固定最底层，不参与排序/移除） */}
-          {baseLayer && (
-            <div className="mt-2 border-t border-border-light pt-2">
-              <LayerTreeRow
-                layer={{ ...baseLayer, name: localize('com_toolbox_map_base') }}
-                selected={selectedKey === baseLayer.key}
-                dragging={false}
-                onSelect={() =>
-                  setSelectedKey((prev) => (prev === baseLayer.key ? null : baseLayer.key))
-                }
-                onToggleVisible={() => patchLayer(baseLayer.key, { visible: !baseLayer.visible })}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setCtxMenu({ key: baseLayer.key, x: e.clientX, y: e.clientY });
-                }}
-              />
+          {/* 底图组：每幅一行、各自显隐（固定最底层，不参与排序/移除/属性） */}
+          {basemapEntries.length > 0 && (
+            <div className="mt-2 flex flex-col gap-0.5 border-t border-border-light pt-2">
+              {basemapEntries.map((b, i) => {
+                const name =
+                  b.name ||
+                  (basemapEntries.length > 1
+                    ? `${localize('com_toolbox_map_base')} ${i + 1}`
+                    : localize('com_toolbox_map_base'));
+                return (
+                  <LayerTreeRow
+                    key={`base:${i}`}
+                    layer={{
+                      key: `base:${i}`,
+                      kind: 'base',
+                      name,
+                      visible: baseVisibility[b.name] ?? true,
+                      opacity: baseLayer?.opacity ?? 1,
+                      color: VECTOR_COLORS[0],
+                    }}
+                    selected={false}
+                    dragging={false}
+                    onSelect={() => setSelectedKey(null)}
+                    onToggleVisible={() =>
+                      setBaseVisibility((prev) => ({ ...prev, [b.name]: !(prev[b.name] ?? true) }))
+                    }
+                    onContextMenu={(e) => e.preventDefault()}
+                  />
+                );
+              })}
             </div>
           )}
         </div>
