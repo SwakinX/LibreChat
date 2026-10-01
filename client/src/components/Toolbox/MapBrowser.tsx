@@ -92,11 +92,82 @@ function sameOriginUrl(url: string): string {
   return url;
 }
 
-/** 按服务类型建瓦片图层：矢量地图服务 → iClient 矢量瓦片（同源反代 +
- * MVT 格式），其余 → 栅格切图（用户指定的浏览器直连策略，2026-09-29）。 */
-function makeTileLayer(url: string): L.TileLayer {
-  const iclient = (L as unknown as IClient).supermap;
+/** 带超时的 fetch（探测请求不能拖住图层创建）。 */
+function fetchWithTimeout(url: string, ms: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
+
+/** 矢量瓦片能力探测结果缓存（每个服务 URL 一次，全会话复用）。 */
+const vectorTileSupport = new Map<string, Promise<boolean>>();
+
+/** 服务能否出矢量瓦片（结果按 URL 缓存）。 */
+function supportsVectorTiles(url: string): Promise<boolean> {
+  let p = vectorTileSupport.get(url);
+  if (!p) {
+    p = probeVectorTiles(url);
+    vectorTileSupport.set(url, p);
+  }
+  return p;
+}
+
+/** 探测：数据源为矢量的 REST 地图服务都能出 tileFeature.mvt（2026-10-01
+ * 用户指定，不按服务名 mvt 限死）。请求整幅 viewBounds 的 MVT，有字节即
+ * 支持；空/404/超时回落栅格切图（栅格当前总是可用，不回归）。 */
+async function probeVectorTiles(url: string): Promise<boolean> {
   if (isMvtUrl(url)) {
+    /* mvt 服务本身就是矢量瓦片服务（缓存缺失时该服务整体无图，探测无意义） */
+    return true;
+  }
+  try {
+    const base = sameOriginUrl(url).replace(/\/+$/, '');
+    const meta = (await fetchWithTimeout(`${base}.json`, 8000).then((r) =>
+      r.ok ? r.json() : null,
+    )) as {
+      coordUnit?: string;
+      viewBounds?: { left?: number; bottom?: number; right?: number; top?: number };
+    } | null;
+    const v = meta?.viewBounds;
+    if (
+      !v ||
+      typeof v.left !== 'number' ||
+      typeof v.bottom !== 'number' ||
+      typeof v.right !== 'number' ||
+      typeof v.top !== 'number'
+    ) {
+      return false;
+    }
+    /* 整幅出图（范围全宽进一张 512 请求）：分辨率=范围宽/512，换算
+     * SuperMap scale（DEGREE 用米/度，METER 直接 1）。 */
+    const resolution = Math.abs(v.right - v.left) / 512;
+    const meterPerUnit = meta?.coordUnit === 'METER' ? 1 : (Math.PI * 6378137.0) / 180.0;
+    const scale = 1 / (resolution * 96 * (1 / 0.0254) * meterPerUnit);
+    const q = new URLSearchParams({
+      origin: JSON.stringify({ x: -180, y: 90 }),
+      returnAttributes: 'false',
+      cacheEnabled: 'false',
+      width: '512',
+      height: '512',
+      viewBounds: JSON.stringify({ left: v.left, bottom: v.bottom, right: v.right, top: v.top }),
+      scale: String(scale),
+    });
+    const resp = await fetchWithTimeout(`${base}/tileFeature.mvt?${q.toString()}`, 15000);
+    if (!resp.ok) {
+      return false;
+    }
+    return (await resp.arrayBuffer()).byteLength > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** 建瓦片图层：探测支持矢量瓦片的（mvt 服务、数据源为矢量的动态地图服务）
+ * 走 iClient 矢量瓦片（同源反代 + MVT），其余栅格切图（用户指定的浏览器
+ * 直连策略，2026-09-29）。 */
+async function makeTileLayer(url: string): Promise<L.TileLayer> {
+  const iclient = (L as unknown as IClient).supermap;
+  if (await supportsVectorTiles(url)) {
     return iclient.tiledVectorLayer(sameOriginUrl(url), {
       /* iServer MVT 服务仅出 tileFeature.mvt（默认 JSON 返回 400，实测）；
        * serverCartoCSSStyle 关掉：MVT 服务无 vectorstyles 端点（返回 HTML
@@ -177,6 +248,10 @@ export default function MapBrowser() {
   const instances = useRef<Map<string, L.Layer>>(new Map());
   const inFlight = useRef<Set<string>>(new Set());
   const fitted = useRef<Set<string>>(new Set());
+  /* 瓦片图层异步创建（探测矢量瓦片能力）的去重与落地校验。 */
+  const pendingTiles = useRef<Map<string, Promise<L.TileLayer>>>(new Map());
+  const layersRef = useRef(layers);
+  layersRef.current = layers;
   const [mapReady, setMapReady] = useState(0);
   /* 行把手 Pointer 拖拽（不用 HTML5 DnD：拖影/命中受全局样式与浏览器差异影响）：
    * 把手上按下即捕获指针，移动中命中哪行就交换到哪行，抬起结束。 */
@@ -219,35 +294,52 @@ export default function MapBrowser() {
     /* 底图组（2.19.0）：按 basemaps 数组序叠放（前者在下）；env 回落时单幅。 */
     const basemapUrls = basemapEntries.map((b) => b.url).filter(Boolean);
 
-    const fallbackInit = () => {
+    /* 底图逐幅异步建层（类型按探测决定）：单幅失败只跳过自身，不塌面板。 */
+    const fallbackInit = async () => {
       const map = L.map(el, {
         zoomControl: true,
         ...view,
         ...(degreeCrs ? { crs: degreeCrs } : {}),
       });
-      baseLayersRef.current = basemapUrls.map((url) => makeTileLayer(url).addTo(map));
+      const layerList: L.TileLayer[] = [];
+      for (const url of basemapUrls) {
+        try {
+          layerList.push(await makeTileLayer(url));
+        } catch (error) {
+          console.warn('[MapBrowser] 底图创建失败:', url, error);
+        }
+      }
+      layerList.forEach((layer) => layer.addTo(map));
+      baseLayersRef.current = layerList;
       return map;
     };
 
     (async () => {
       let map: L.Map;
       try {
-        if (isMvtUrl(basemapUrls[0] ?? '')) {
-          // 首幅是矢量瓦片服务：initMap 只识别栅格切图协议，直接走 fallback
-          throw new Error('mvt-basemap');
+        if (await supportsVectorTiles(basemapUrls[0] ?? '')) {
+          // 首幅是矢量瓦片图层：initMap 只识别栅格切图协议，直接走 fallback
+          throw new Error('vector-basemap');
         }
         el.id = 'map'; // initMap 以固定 id 建图（首幅底图走官方切图方案）
         const created = await iclient.initMap(basemapUrls[0], {
           mapOptions: { zoomControl: true, ...view },
         });
         map = created.map;
-        baseLayersRef.current = [
-          created.layer,
-          ...basemapUrls.slice(1).map((url) => makeTileLayer(url).addTo(map)),
-        ];
+        baseLayersRef.current = [created.layer];
+        for (const url of basemapUrls.slice(1)) {
+          try {
+            const layer = await makeTileLayer(url);
+            layer.addTo(map);
+            baseLayersRef.current.push(layer);
+          } catch (error) {
+            /* 此处再失败不能落回 fallback（地图已建好，容器重初始化会抛错） */
+            console.warn('[MapBrowser] 底图创建失败:', url, error);
+          }
+        }
       } catch {
         delete (el as unknown as { _leaflet_id?: number })._leaflet_id;
-        map = fallbackInit();
+        map = await fallbackInit();
       }
       if (cancelled) {
         map.remove();
@@ -322,11 +414,43 @@ export default function MapBrowser() {
       /* 单个坏图层只影响自身：创建/挂载失败时移除实例记录，下次同步重建
        * （2.20.0 实测：矢量瓦片图层异常曾致整面板白屏崩溃）。 */
       try {
-        let tile = inst.get(l.key) as L.TileLayer | undefined;
+        const tile = inst.get(l.key) as L.TileLayer | undefined;
         if (!tile) {
-          /* 矢量地图服务（map-mvt-*）以矢量瓦片方式出图（2.20.0）。 */
-          tile = makeTileLayer(l.url);
-          inst.set(l.key, tile);
+          /* 图层类型按探测异步决定（矢量瓦片/栅格，2.20.1）：pending 去重；
+           * 落地前按最新 layers 校验（创建期间可能已被删/换地图），属性由
+           * 落地处直接补齐（同步 effect 不会再因创建完成而重跑）。 */
+          const key = l.key;
+          let creating = pendingTiles.current.get(key);
+          if (!creating) {
+            creating = makeTileLayer(l.url);
+            pendingTiles.current.set(key, creating);
+          }
+          creating
+            .then((created) => {
+              pendingTiles.current.delete(key);
+              if (mapRef.current !== map) {
+                return;
+              }
+              const cur = layersRef.current.find((x) => x.key === key);
+              if (!cur) {
+                return;
+              }
+              inst.set(key, created);
+              if (cur.visible && !map.hasLayer(created)) {
+                created.addTo(map);
+              }
+              try {
+                created.setOpacity(cur.opacity);
+                created.setZIndex(layersRef.current.findIndex((x) => x.key === key) + 10);
+              } catch {
+                /* 容器未就绪时跳过，就绪后下次同步生效 */
+              }
+            })
+            .catch((error) => {
+              pendingTiles.current.delete(key);
+              console.warn('[MapBrowser] 图层创建失败:', l.name, error);
+            });
+          return;
         }
         if (l.visible) {
           if (!map.hasLayer(tile)) {
