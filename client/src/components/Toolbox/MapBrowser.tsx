@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-/* SuperMap mapbox-gl-enhance：mapbox-gl 1.12.1 定制构建（window.mapboxgl
- * 官方示例同款，内置 crs 度网格支持——官方 01_tiledMapLayer_4490 示例即此
- * 用法）。不用 npm mapbox-gl 裸版：它没有 CRS，4490 服务瓦片对不上网格。
- * 经 libs/mapboxgl 包装：workerUrl 指向 public 原始副本（vite 打包会弄坏
- * 内联 worker，矢量瓦片解析全灭而栅格正常——实测）。 */
-import mapboxgl from '../../libs/mapboxgl';
+/* SuperMap mapbox-gl-enhance：经 libs/mapboxgl 运行时 <script> 加载（打包器
+ * 会破坏其三段 chunk 结构与内联 worker——见该文件说明），组件在建图前
+ * `await ensureMapboxGL()`。引擎能力：crs 度网格、rasterSource:'iserver'
+ * （官方 01_tiledMapLayer_4490 示例同款）。 */
+import { ensureMapboxGL } from '../../libs/mapboxgl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import '../../libs/mapbox-gl-enhance.css';
 import { request } from 'librechat-data-provider';
@@ -85,8 +84,9 @@ type LayerHandle = {
 /* @types/mapbox-gl 各版本对 Layer/Source 联合类型的命名差异大（v1 AnyLayer、
  * v3 改名），统一取 addLayer/addSource 的参数类型做断言——运行时对象来自
  * 官方样式或本文件构造，类型层面只求版本无关。 */
-type AddLayerArg = Parameters<mapboxgl.Map['addLayer']>[0];
-type AddSourceArg = Parameters<mapboxgl.Map['addSource']>[1];
+type MapboxMap = import('mapbox-gl').Map;
+type AddLayerArg = Parameters<MapboxMap['addLayer']>[0];
+type AddSourceArg = Parameters<MapboxMap['addSource']>[1];
 
 /** 矢量取数走 fetch：HTTPS 页面直连 http 内网地址会被 Chrome 混合内容
  * 拦截，http 服务经 nginx /iserver/ 同源反代取（上游固定一台 iServer，
@@ -141,7 +141,7 @@ function getVectorStyle(url: string): Promise<StyleJSON | null> {
 /** 栅格瓦片图层（增强版引擎官方用法，01_tiledMapLayer_4490 示例同款）：
  * tiles 直接放 iServer 地图服务 URL + rasterSource:'iserver'——引擎在 crs
  * 度网格下自行计算切图方案并动态出图（模板/prjCoordSys 补丁全部作废）。 */
-function addRasterHandle(map: mapboxgl.Map, key: string, url: string): LayerHandle {
+function addRasterHandle(map: MapboxMap, key: string, url: string): LayerHandle {
   const sourceId = `${key}:src`;
   const layerId = `${key}:lyr`;
   map.addSource(sourceId, {
@@ -159,7 +159,7 @@ function addRasterHandle(map: mapboxgl.Map, key: string, url: string): LayerHand
  * 文本图层依赖 glyphs/sprite，它们是 style 级配置——仅首个服务的能在建图
  * 时声明；后续服务若带文本图层且缺 glyphs，引擎会拒绝该层（错误事件可见），
  * 其余图层不受影响。 */
-function addVectorHandle(map: mapboxgl.Map, key: string, style: StyleJSON): LayerHandle {
+function addVectorHandle(map: MapboxMap, key: string, style: StyleJSON): LayerHandle {
   const sourceIds: string[] = [];
   const sourceMap: Record<string, string> = {};
   for (const [id, src] of Object.entries(style.sources)) {
@@ -253,12 +253,7 @@ function geojsonBounds(data: unknown): [number, number, number, number] | null {
 
 /** GeoJSON 图层：source 常驻（重查 setData 原地更新），按出现的几何类型建
  * circle/line/fill（点=圆点、线=2px、面=25% 填充，延续 Leaflet 版风格）。 */
-function addGeojsonHandle(
-  map: mapboxgl.Map,
-  key: string,
-  data: unknown,
-  color: string,
-): LayerHandle {
+function addGeojsonHandle(map: MapboxMap, key: string, data: unknown, color: string): LayerHandle {
   const sourceId = `${key}:src`;
   map.addSource(sourceId, { type: 'geojson', data } as unknown as AddSourceArg);
   const kinds = geometryKinds(data);
@@ -300,7 +295,7 @@ function addGeojsonHandle(
 }
 
 /** 显隐同步（隐藏的层保留在 style 里，layout.visibility 切换）。 */
-function setHandleVisible(map: mapboxgl.Map, handle: LayerHandle, visible: boolean): void {
+function setHandleVisible(map: MapboxMap, handle: LayerHandle, visible: boolean): void {
   for (const { id } of handle.layers) {
     try {
       map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
@@ -313,7 +308,7 @@ function setHandleVisible(map: mapboxgl.Map, handle: LayerHandle, visible: boole
 /** 透明度/着色同步：按图层类型写对应 paint 属性。面填充按 Leaflet 版惯例
  * 取 opacity 的 1/4，描边/线/点全量。 */
 function applyHandleStyle(
-  map: mapboxgl.Map,
+  map: MapboxMap,
   handle: LayerHandle,
   opts: { opacity: number; color?: string },
 ): void {
@@ -347,7 +342,7 @@ function applyHandleStyle(
 }
 
 /** 摘除句柄的全部 style 资源（先层后源）。 */
-function removeHandle(map: mapboxgl.Map, handle: LayerHandle): void {
+function removeHandle(map: MapboxMap, handle: LayerHandle): void {
   for (const { id } of handle.layers) {
     try {
       map.removeLayer(id);
@@ -364,7 +359,7 @@ function removeHandle(map: mapboxgl.Map, handle: LayerHandle): void {
   }
 }
 
-function mapBbox(map: mapboxgl.Map): [number, number, number, number] {
+function mapBbox(map: MapboxMap): [number, number, number, number] {
   const bounds = map.getBounds();
   return [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
 }
@@ -433,7 +428,7 @@ export default function MapBrowser() {
 
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<MapboxMap | null>(null);
   const baseHandlesRef = useRef<Map<string, LayerHandle>>(new Map());
   const handlesRef = useRef<Map<string, LayerHandle>>(new Map());
   const inFlight = useRef<Set<string>>(new Set());
@@ -498,6 +493,9 @@ export default function MapBrowser() {
     let removeFullscreenHook: (() => void) | null = null;
 
     (async () => {
+      /* 运行时加载增强引擎（<script> 注入，见 libs/mapboxgl 说明）。首载会
+       * 拉取 ~1.6MB 脚本，之后全会话复用。 */
+      const mapboxgl = await ensureMapboxGL();
       /* 建图不等待任何探测（探测慢时面板整片空白，实测）：以当前 glyphs
        * 状态立起画布。glyphs/sprite 是 style 级配置且 v1 建图后不可改——
        * 由独立探测 effect 异步解析（glyphsUrl 状态），解析到后地图重建一次
@@ -563,7 +561,7 @@ export default function MapBrowser() {
       mapRef.current = map;
       /* 调试钩子：控制台可直接查 getStyle()/queryRenderedFeatures；同时把
        * 引擎 error 事件显式落日志（此前无监听，worker/瓦片错误不可见）。 */
-      (window as unknown as { __map?: mapboxgl.Map }).__map = map;
+      (window as unknown as { __map?: MapboxMap }).__map = map;
       map.on('error', (e) => {
         console.error('[MapBrowser] map error:', (e as { error?: Error }).error?.message || e);
       });

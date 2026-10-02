@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 /* SuperMap mapbox-gl-enhance（同 MapBrowser）：crs 度网格支持，官方
  * 01_tiledMapLayer_4490 示例同款。 */
-import mapboxgl from '../../libs/mapboxgl';
+import { ensureMapboxGL } from '../../libs/mapboxgl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import '../../libs/mapbox-gl-enhance.css';
 import { useLocalize } from '~/hooks';
@@ -9,6 +9,8 @@ import { useMapConfig } from './api';
 
 /** 结果预览的叠加配色（MapBrowser 数据层默认色系的首色）。 */
 const OVERLAY_COLOR = '#6366f1';
+
+type MapboxMap = import('mapbox-gl').Map;
 
 /** GeoJSON 中出现的几何大类（空/无几何不建对应层）。 */
 function geometryKinds(data: unknown): { point: boolean; line: boolean; polygon: boolean } {
@@ -80,18 +82,18 @@ export default function MapPanel({
   const localize = useLocalize();
   const { data: config, isLoading } = useMapConfig();
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<MapboxMap | null>(null);
   const sourceRef = useRef<string | null>(null);
   const [mapReady, setMapReady] = useState(0);
 
-  /* Init once, after the config arrives and the container has its size. */
+  /* Init once, after the config arrives and the container has its size.
+   * 引擎经 ensureMapboxGL 异步就绪（运行时 <script>，见 libs/mapboxgl）。 */
   useEffect(() => {
     if (!config?.configured || !containerRef.current || mapRef.current) {
       return;
     }
+    let cancelled = false;
     const el = containerRef.current;
-    /* iServer 端 dom 服务 center=[0,-90]（服务未配中心）——无效中心用默认视野。
-     * Leaflet 时代 center=[lat,lng]；mapbox 是 [lng,lat]。 */
     /* 无效中心（[0,0] / iServer 未配的 [0,-90]）回落四川全省默认视野；
      * lng=0 或 lat=0 的配置视为垃圾值。Leaflet 时代 [lat,lng]，mapbox
      * 是 [lng,lat]。 */
@@ -107,67 +109,79 @@ export default function MapPanel({
       .map((b) => b.url)
       .filter(Boolean) as string[];
 
-    /* 度坐标系服务启用增强版 crs（官方 4490 示例同款）。 */
-    const degreeCrs = [4326, 4490, 4214, 4610].includes(config.epsg ?? 0)
-      ? `EPSG:${config.epsg}`
-      : undefined;
-    const map = new mapboxgl.Map({
-      container: el,
-      style: { version: 8, sources: {}, layers: [] },
-      center,
-      zoom,
-      ...(degreeCrs ? { crs: degreeCrs } : {}),
-    } as never);
-    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
-    map.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }), 'bottom-left');
-    /* addSource/addLayer 必须等 style load（否则 "Style is not done loading"，
-     * 实测）；栅格底图与 mapReady 都挂到 load 事件上。栅格源走增强引擎
-     * 官方形式（tiles=服务URL + rasterSource:'iserver'，引擎自行出图）。 */
-    map.on('load', () => {
-      basemapUrls.forEach((url, i) => {
-        const sourceId = `base:${i}`;
-        map.addSource(sourceId, {
-          type: 'raster',
-          tiles: [url],
-          tileSize: 256,
-          rasterSource: 'iserver',
-          attribution: '© SuperMap iServer',
-        } as never);
-        map.addLayer({ id: sourceId, type: 'raster', source: sourceId });
+    (async () => {
+      const mapboxgl = await ensureMapboxGL();
+      if (cancelled) {
+        return;
+      }
+      /* 度坐标系服务启用增强版 crs（官方 4490 示例同款）。 */
+      const degreeCrs = [4326, 4490, 4214, 4610].includes(config.epsg ?? 0)
+        ? `EPSG:${config.epsg}`
+        : undefined;
+      const map = new mapboxgl.Map({
+        container: el,
+        style: { version: 8, sources: {}, layers: [] },
+        center,
+        zoom,
+        ...(degreeCrs ? { crs: degreeCrs } : {}),
+      } as never);
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
+      map.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+      /* addSource/addLayer 必须等 style load（否则 "Style is not done loading"，
+       * 实测）；栅格底图与 mapReady 都挂到 load 事件上。栅格源走增强引擎
+       * 官方形式（tiles=服务URL + rasterSource:'iserver'，引擎自行出图）。 */
+      map.on('load', () => {
+        if (cancelled) {
+          return;
+        }
+        basemapUrls.forEach((url, i) => {
+          const sourceId = `base:${i}`;
+          map.addSource(sourceId, {
+            type: 'raster',
+            tiles: [url],
+            tileSize: 256,
+            rasterSource: 'iserver',
+            attribution: '© SuperMap iServer',
+          } as never);
+          map.addLayer({ id: sourceId, type: 'raster', source: sourceId });
+        });
+        setMapReady((n) => n + 1);
       });
-      setMapReady((n) => n + 1);
-    });
-    /* 点要素弹窗：前 8 个属性。 */
-    map.on('click', (e) => {
-      const overlayLayers = map
-        .getStyle()
-        .layers?.filter((l) => l.id.startsWith('overlay:'))
-        .map((l) => l.id);
-      if (!overlayLayers?.length) {
-        return;
-      }
-      const feats = map.queryRenderedFeatures(e.point, { layers: overlayLayers });
-      if (!feats.length) {
-        return;
-      }
-      const props = (feats[0].properties ?? {}) as Record<string, unknown>;
-      const text = Object.entries(props)
-        .slice(0, 8)
-        .map(([key, value]) => `${key}: ${String(value)}`)
-        .join('<br/>');
-      if (!text) {
-        return;
-      }
-      new mapboxgl.Popup({ closeButton: true, maxWidth: '320px' })
-        .setLngLat(e.lngLat)
-        .setHTML(text)
-        .addTo(map);
-    });
-    mapRef.current = map;
+      /* 点要素弹窗：前 8 个属性。 */
+      map.on('click', (e) => {
+        const overlayLayers = map
+          .getStyle()
+          .layers?.filter((l) => l.id.startsWith('overlay:'))
+          .map((l) => l.id);
+        if (!overlayLayers?.length) {
+          return;
+        }
+        const feats = map.queryRenderedFeatures(e.point, { layers: overlayLayers });
+        if (!feats.length) {
+          return;
+        }
+        const props = (feats[0].properties ?? {}) as Record<string, unknown>;
+        const text = Object.entries(props)
+          .slice(0, 8)
+          .map(([key, value]) => `${key}: ${String(value)}`)
+          .join('<br/>');
+        if (!text) {
+          return;
+        }
+        new mapboxgl.Popup({ closeButton: true, maxWidth: '320px' })
+          .setLngLat(e.lngLat)
+          .setHTML(text)
+          .addTo(map);
+      });
+      mapRef.current = map;
+    })();
 
     return () => {
-      map.remove();
-      mapRef.current = null;
+      cancelled = true;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
       sourceRef.current = null;
     };
   }, [config]);

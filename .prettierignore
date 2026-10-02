@@ -3,3 +3,4 @@
 packages/api/openapi/agents.openapi.json
 # Vendored third-party bundles — do not reformat
 client/src/libs/**
+client/public/libs/**
