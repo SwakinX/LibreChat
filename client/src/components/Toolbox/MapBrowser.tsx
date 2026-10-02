@@ -169,19 +169,56 @@ async function probeVectorTiles(url: string): Promise<boolean> {
   }
 }
 
+/** iClient 矢量瓦片图层的内部结构（仅取需要的成员，签名对齐运行时）。 */
+type VectorLayerInternals = {
+  /** _initLayerUrl 拼好的基址：tileFeature.mvt?origin=…&width=… 等（不含 x/y） */
+  _tileUrl: string;
+  _crs: { project(latlng: L.LatLng): L.Point };
+  _getTileUrl: (coords: { x: number; y: number; z: number }) => string;
+  getScaleFromCoords: (coords: { z: number }) => number;
+  _tileCoordsToBounds: (coords: { x: number; y: number; z: number }) => L.LatLngBounds;
+};
+
+/** 逐瓦片请求改写为 viewBounds 形式。动态地图服务不支持 iClient 默认的
+ * 瓦片索引（x/y+scale）取数：5.28 实测任意 origin/scale 组合下 x/y 形式的
+ * tileFeature.mvt 一律 200+0 字节，viewBounds 形式才出真实数据（单瓦片
+ * 898KB，且 scale 不必对齐服务 visibleScales）。按 Leaflet 行列号用当前
+ * CRS 算出瓦片地理范围改发 viewBounds——探测（probeVectorTiles）同形，
+ * 行为一致。 */
+function rewriteTileUrlToViewBounds(layer: L.TileLayer): void {
+  const vl = layer as unknown as VectorLayerInternals;
+  vl._getTileUrl = (coords) => {
+    if (!vl._crs) {
+      /* onAdd 前不会取瓦片；防御性回落避免渲染线程抛错 */
+      return vl._tileUrl;
+    }
+    const bounds = vl._tileCoordsToBounds(coords);
+    const sw = vl._crs.project(bounds.getSouthWest());
+    const ne = vl._crs.project(bounds.getNorthEast());
+    const viewBounds = JSON.stringify({
+      leftBottom: { x: sw.x, y: sw.y },
+      rightTop: { x: ne.x, y: ne.y },
+    });
+    return `${vl._tileUrl}&viewBounds=${encodeURIComponent(viewBounds)}&scale=${vl.getScaleFromCoords(coords)}`;
+  };
+}
+
 /** 建瓦片图层：探测支持矢量瓦片的（mvt 服务、数据源为矢量的动态地图服务）
- * 走 iClient 矢量瓦片（同源反代 + MVT），其余栅格切图（用户指定的浏览器
- * 直连策略，2026-09-29）。 */
+ * 走 iClient 矢量瓦片（https 直连或同源反代 + MVT），其余栅格切图（用户指
+ * 定的浏览器直连策略，2026-09-29）。 */
 async function makeTileLayer(url: string): Promise<L.TileLayer> {
   const iclient = (L as unknown as IClient).supermap;
   if (await supportsVectorTiles(url)) {
-    return iclient.tiledVectorLayer(sameOriginUrl(url), {
+    const layer = iclient.tiledVectorLayer(sameOriginUrl(url), {
       /* iServer MVT 服务仅出 tileFeature.mvt（默认 JSON 返回 400，实测）；
-       * serverCartoCSSStyle 关掉：MVT 服务无 vectorstyles 端点（返回 HTML
-       * 错误页），开着会永远等不到出图回调，样式回落图层自带配置。 */
+       * serverCartoCSSStyle 关掉：矢量瓦片服务无 vectorstyles 端点（5.28
+       * 动态地图同样 404），开着会永远等不到出图回调，样式回落图层自带
+       * 配置。 */
       format: 'MVT',
       serverCartoCSSStyle: false,
     }) as unknown as L.TileLayer;
+    rewriteTileUrlToViewBounds(layer);
+    return layer;
   }
   return iclient.tiledMapLayer(url);
 }
