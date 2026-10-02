@@ -589,7 +589,14 @@ export default function MapBrowser() {
       removeFullscreenHook = () =>
         document.removeEventListener('fullscreenchange', onFullscreenChange);
       mapRef.current = map;
-      setMapReady((n) => n + 1);
+      /* addSource/addLayer 必须等 style 就绪，否则 "Style is not done
+       * loading"（实测）。mapReady 只在 load 后置位——各同步 effect 以此
+       * 为闸，此前的一切改 style 操作都不会发生。 */
+      map.on('load', () => {
+        if (!cancelled) {
+          setMapReady((n) => n + 1);
+        }
+      });
     })();
 
     return () => {
@@ -609,10 +616,11 @@ export default function MapBrowser() {
 
   const baseLayer = layers.find((l) => l.kind === 'base');
 
-  /* 底图同步：每幅一个句柄（vectorstyles 优先、栅格回落），显隐/透明度跟随。 */
+  /* 底图同步：每幅一个句柄（vectorstyles 优先、栅格回落），显隐/透明度跟随。
+   * mapReady=0 表示 style 未 load，改 style 会抛错——闸住。 */
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) {
+    if (!map || !mapReady) {
       return;
     }
     basemapEntries.forEach((b, i) => {
@@ -699,7 +707,7 @@ export default function MapBrowser() {
   /* 瓦片图层同步：增删/显隐/透明度（vectorstyles 可用即矢量瓦片，否则栅格）。 */
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) {
+    if (!map || !mapReady) {
       return;
     }
     const handles = handlesRef.current;
@@ -764,7 +772,7 @@ export default function MapBrowser() {
   const prevFeaturesRef = useRef<Record<string, unknown>>({});
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) {
+    if (!map || !mapReady) {
       return;
     }
     const handles = handlesRef.current;
@@ -826,7 +834,7 @@ export default function MapBrowser() {
   const orderStampRef = useRef('');
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) {
+    if (!map || !mapReady) {
       return;
     }
     const stamp = layers.map((l) => l.key).join('|');

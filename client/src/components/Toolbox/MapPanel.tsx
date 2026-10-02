@@ -116,15 +116,20 @@ export default function MapPanel({
     });
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
     map.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }), 'bottom-left');
-    basemapUrls.forEach((url, i) => {
-      const sourceId = `base:${i}`;
-      map.addSource(sourceId, {
-        type: 'raster',
-        tiles: [rasterTileTemplate(url)],
-        tileSize: 256,
-        attribution: '© SuperMap iServer',
+    /* addSource/addLayer 必须等 style load（否则 "Style is not done loading"，
+     * 实测）；栅格底图与 mapReady 都挂到 load 事件上。 */
+    map.on('load', () => {
+      basemapUrls.forEach((url, i) => {
+        const sourceId = `base:${i}`;
+        map.addSource(sourceId, {
+          type: 'raster',
+          tiles: [rasterTileTemplate(url)],
+          tileSize: 256,
+          attribution: '© SuperMap iServer',
+        });
+        map.addLayer({ id: sourceId, type: 'raster', source: sourceId });
       });
-      map.addLayer({ id: sourceId, type: 'raster', source: sourceId });
+      setMapReady((n) => n + 1);
     });
     /* 点要素弹窗：前 8 个属性。 */
     map.on('click', (e) => {
@@ -153,7 +158,6 @@ export default function MapPanel({
         .addTo(map);
     });
     mapRef.current = map;
-    setMapReady((n) => n + 1);
 
     return () => {
       map.remove();
