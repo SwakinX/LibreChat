@@ -29,9 +29,6 @@ import type {
   ReactNode,
 } from 'react';
 import 'mapbox-gl/dist/mapbox-gl.css';
-/* 官方可视化示例同款样式表（Logo 等控件依赖，technical-topics 引入清单之一）。 */
-import '@supermapgis/iclient-mapboxgl/dist/iclient-mapboxgl.min.css';
-import { Logo } from '@supermapgis/iclient-mapboxgl';
 import {
   useChoicesFrom,
   useExecuteTool,
@@ -541,7 +538,9 @@ export default function MapBrowser() {
       });
       map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
       map.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }), 'bottom-left');
-      map.addControl(new Logo(), 'bottom-right');
+      /* 不用 iclient 的 Logo 控件：其类没有 onRemove，mapbox v1 的
+       * map.remove() 不设防直接调用——glyphs 解析后重建地图时必炸（实测
+       * "onRemove is not a function" 整面板崩到错误页）。 */
       /* 点要素弹窗：矢量数据层前 8 个属性（延续 Leaflet bindPopup 内容）。 */
       map.on('click', (e) => {
         const vectorKeys = layersRef.current
