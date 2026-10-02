@@ -117,8 +117,10 @@ export default defineConfig(({ command }) => ({
           'assets/locale-*.js',
           'assets/query-devtools*.js',
         ],
-        /** vendor 含 Leaflet + SuperMap iClient GIS 库后达 ~9.3MB（2026-09-29）。 */
-        maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
+        /** vendor：Leaflet+iClient 时代 ~9.3MB（2026-09-29）；2.21.0 换
+         * mapbox-gl + iclient-mapboxgl（含 turf/mapv/proj4 依赖链）后 ~14MB
+         * （2026-10-02 构建实测），留余量到 20MB。 */
+        maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
         /**
          * vite-plugin-pwa defaults this to `/^assets\//`, which is only true for the
          * hashed bundle output: the icons live in `assets/` under stable filenames, so the
