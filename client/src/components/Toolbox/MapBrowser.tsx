@@ -29,6 +29,9 @@ import type {
 } from 'react';
 import 'leaflet/dist/leaflet.css';
 import '@supermapgis/iclient-leaflet';
+/* 深引 FetchRequest 与图层内部共享同一模块实例（webpack 按解析路径去重），
+ * 下方对 get 的超时补丁才作用到矢量瓦片取数上。 */
+import { FetchRequest } from '@supermapgis/iclient-common/util/FetchRequest';
 import {
   useChoicesFrom,
   useExecuteTool,
@@ -49,7 +52,7 @@ type IClient = {
     /** 矢量瓦片图层（iServer MVT 服务，2.20.0）。 */
     tiledVectorLayer: (
       url: string,
-      options?: { format?: string; serverCartoCSSStyle?: boolean },
+      options?: { format?: string; serverCartoCSSStyle?: boolean; timeout?: number },
     ) => L.TileLayer;
     initMap: (
       url: string,
@@ -59,6 +62,20 @@ type IClient = {
 };
 
 type LayerKind = 'base' | 'tiled' | 'vector';
+
+/** 矢量瓦片取数超时兜底。VectorTilePBF.getTile 写死 FetchRequest timeout
+ * 10000（_timeout 参数按毫秒计），且超时只放弃 promise、不断底层请求——
+ * 动态生成慢的服务（5.28 a4work改前 z7 级单瓦片 >10s 实测）表现为"网络里
+ * 有瓦片、图面空白"。对恰好 10s 的请求放宽到 60s；其余请求的超时来自各自
+ * options（本文件显式传 60000 的 initLayersInfo 不经此分支）。 */
+const TILE_FETCH_TIMEOUT_MS = 60000;
+const origFetchRequestGet: typeof FetchRequest.get = FetchRequest.get.bind(FetchRequest);
+FetchRequest.get = function (url: string, params?: unknown, options?: { timeout?: number }) {
+  if (options?.timeout === 10000) {
+    return origFetchRequestGet(url, params, { ...options, timeout: TILE_FETCH_TIMEOUT_MS });
+  }
+  return origFetchRequestGet(url, params, options);
+} as typeof FetchRequest.get;
 
 /** 图层状态（可持久化；矢量要素数据不入 localStorage——恢复时按 reg 重查）。 */
 type MapLayer = {
@@ -213,9 +230,11 @@ async function makeTileLayer(url: string): Promise<L.TileLayer> {
       /* iServer MVT 服务仅出 tileFeature.mvt（默认 JSON 返回 400，实测）；
        * serverCartoCSSStyle 关掉：矢量瓦片服务无 vectorstyles 端点（5.28
        * 动态地图同样 404），开着会永远等不到出图回调，样式回落图层自带
-       * 配置。 */
+       * 配置。timeout 管元数据请求（initLayersInfo 拉图层信息，默认 10s
+       * 在慢服务上不够）；逐瓦片的硬编码超时由 FetchRequest 补丁兜住。 */
       format: 'MVT',
       serverCartoCSSStyle: false,
+      timeout: TILE_FETCH_TIMEOUT_MS,
     }) as unknown as L.TileLayer;
     rewriteTileUrlToViewBounds(layer);
     return layer;
