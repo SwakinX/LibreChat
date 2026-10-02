@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
+import { request } from 'librechat-data-provider';
 import {
   Button,
   OGDialog,
@@ -150,7 +151,8 @@ async function rasterTileDigest(
 /** 官方矢量瓦片样式：经服务端判断代理获取（/map/vectorstyle）。浏览器不直接
  * 请求 iServer 的 vectorstyles.json——栅格服务上那是一次无法抑制的 404 控制
  * 台报错；服务端探测后浏览器永远拿到 200（样式 JSON 或 capable:false），
- * 结果按 URL 缓存全会话复用。 */
+ * 结果按 URL 缓存全会话复用。必须走 request（自动附 JWT）——裸 fetch 会被
+ * requireJwtAuth 拒之门外（401，实测）。 */
 const vectorStyleCache = new Map<string, Promise<StyleJSON | null>>();
 
 function getVectorStyle(url: string): Promise<StyleJSON | null> {
@@ -158,14 +160,10 @@ function getVectorStyle(url: string): Promise<StyleJSON | null> {
   if (!p) {
     p = (async () => {
       try {
-        const resp = await fetchWithTimeout(
+        const payload = (await request.get(
           `/api/terravox/map/vectorstyle?url=${encodeURIComponent(url)}`,
-          25000,
-        );
-        if (!resp.ok) {
-          return null;
-        }
-        const payload = (await resp.json()) as { capable: boolean; style?: StyleJSON };
+          { timeout: 30000 },
+        )) as { capable: boolean; style?: StyleJSON };
         if (!payload?.capable || !payload.style) {
           return null;
         }
