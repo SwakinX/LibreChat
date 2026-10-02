@@ -65,7 +65,7 @@ type MapLayer = {
   color: string;
 };
 
-/** 官方 vectorstyles.json 返回结构的最小声明（iclient-mapboxgl InitMap 同源）。 */
+/** 官方矢量瓦片样式返回结构的最小声明。 */
 type StyleJSON = {
   version: number;
   sources: Record<string, Record<string, unknown>>;
@@ -400,16 +400,17 @@ function loadLayers(): MapLayer[] {
 }
 
 /**
- * 地图浏览器（?panel=map 独立面板，2.16.0）：GIS 风格图层树 + Mapbox GL 出图
- * （2.21.0 引擎自 Leaflet 迁至 mapbox-gl + 官方 SuperMap iClient for MapboxGL
- * 服务模板）。矢量瓦片/动态矢量瓦片统一走官方 vectorstyles.json 样式（取不到
- * 回落 zxyTileImage 栅格，两条都是 iclient-mapboxgl 的官方路径，无自写桥接）；
- * 度坐标系服务由服务端按 prjCoordSys 3857 重投影进 Mercator 网格。
+ * 地图浏览器（?panel=map 独立面板，2.16.0）：GIS 风格图层树 + SuperMap
+ * mapbox-gl-enhance 出图（2.21.0 自 Leaflet 迁入；2.21.1 起用增强引擎）。
+ * 引擎 = mapbox-gl 1.12.1 SuperMap 定制构建（内置 crs 度网格），栅格源
+ * tiles=[服务URL]+rasterSource:'iserver'、矢量服务走官方 vectorstyles 样式
+ * （服务端判断代理，取不到回落栅格）——均为官方 01_tiledMapLayer_4490
+ * 示例同款用法，无自写桥接。
  * - 左侧「图层」树：拖拽把手改叠放次序（数组序 = 绘制序，后者在上），底图
  *   固定最底层不参与排序；点行内嵌展开控制（透明度/着色/缩放到图层/重查/移除）；
  * - 右上角 +：二级菜单「添加图层」（先选注册的服务、再选数据集/地图）与
  *   「添加 REST 服务」（粘贴 iServer 链接识别临时图层）；
- * - 刷新按钮：按当前地图范围重查全部矢量图层；
+ * - 刷新按钮：按当前地图范围重查全部矢量图层；右下角实时视角读数；
  * - 打开后工具箱标题栏切换为地图浏览器（见 Toolbox/index.tsx）。
  */
 export default function MapBrowser() {
@@ -560,6 +561,12 @@ export default function MapBrowser() {
       ro.observe(el);
       removeFullscreenHook = () => ro.disconnect();
       mapRef.current = map;
+      /* 调试钩子：控制台可直接查 getStyle()/queryRenderedFeatures；同时把
+       * 引擎 error 事件显式落日志（此前无监听，worker/瓦片错误不可见）。 */
+      (window as unknown as { __map?: mapboxgl.Map }).__map = map;
+      map.on('error', (e) => {
+        console.error('[MapBrowser] map error:', (e as { error?: Error }).error?.message || e);
+      });
       /* addSource/addLayer 必须等 style 就绪，否则 "Style is not done
        * loading"（实测）。mapReady 只在 load 后置位——各同步 effect 以此
        * 为闸，此前的一切改 style 操作都不会发生。 */
