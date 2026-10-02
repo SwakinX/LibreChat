@@ -580,6 +580,24 @@ export default function MapBrowser() {
     // 到值时重建一次（文本图层依赖 style 级 glyphs）
   }, [config, glyphsUrl]);
 
+  /* 视角读数：屏幕中心坐标 + 层级，随地图移动实时刷新（右下角显示）。 */
+  const [viewInfo, setViewInfo] = useState('');
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) {
+      return;
+    }
+    const update = () => {
+      const c = map.getCenter();
+      setViewInfo(`${c.lng.toFixed(5)}, ${c.lat.toFixed(5)} · z${map.getZoom().toFixed(1)}`);
+    };
+    update();
+    map.on('move', update);
+    return () => {
+      map.off('move', update);
+    };
+  }, [mapReady]);
+
   /* glyphs 解析（非阻塞，不挡建图）：在底图组 + 已配置瓦片图层里找第一个
    * vectorstyles 可出且带 glyphs 的服务。结果置入 glyphsUrl → 地图重建。 */
   const glyphCandidatesKey = [
@@ -1261,6 +1279,11 @@ export default function MapBrowser() {
                * 高、地图视口为空。内联样式兜底，任何构建序下都成立。 */
               style={{ position: 'absolute', inset: 0 }}
             />
+            {viewInfo && (
+              <div className="pointer-events-none absolute bottom-2 end-2 z-[1000] rounded-md border border-border-medium bg-surface-primary/90 px-2 py-1 text-xs tabular-nums text-text-secondary">
+                {viewInfo}
+              </div>
+            )}
             <button
               type="button"
               title={localize('com_toolbox_map_fullscreen')}
