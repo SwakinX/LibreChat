@@ -147,9 +147,10 @@ async function rasterTileDigest(
   }
 }
 
-/** 官方矢量瓦片样式：tileFeature/vectorstyles.json（InitMap type=vector-tile
- * 同参数，tileURLTemplate=ZXY 出 Mercator 网格瓦片模板）。取不到（404/超时/
- * 非 style JSON）返回 null，调用方回落栅格。结果按 URL 缓存全会话复用。 */
+/** 官方矢量瓦片样式：经服务端判断代理获取（/map/vectorstyle）。浏览器不直接
+ * 请求 iServer 的 vectorstyles.json——栅格服务上那是一次无法抑制的 404 控制
+ * 台报错；服务端探测后浏览器永远拿到 200（样式 JSON 或 capable:false），
+ * 结果按 URL 缓存全会话复用。 */
 const vectorStyleCache = new Map<string, Promise<StyleJSON | null>>();
 
 function getVectorStyle(url: string): Promise<StyleJSON | null> {
@@ -157,19 +158,18 @@ function getVectorStyle(url: string): Promise<StyleJSON | null> {
   if (!p) {
     p = (async () => {
       try {
-        const base = sameOriginUrl(url).replace(/\/+$/, '');
         const resp = await fetchWithTimeout(
-          `${base}/tileFeature/vectorstyles.json?type=MapBox_GL&styleonly=true&tileURLTemplate=ZXY`,
-          15000,
+          `/api/terravox/map/vectorstyle?url=${encodeURIComponent(url)}`,
+          25000,
         );
         if (!resp.ok) {
           return null;
         }
-        const style = (await resp.json()) as StyleJSON | null;
-        if (!style || style.version !== 8 || !style.sources || !style.layers) {
+        const payload = (await resp.json()) as { capable: boolean; style?: StyleJSON };
+        if (!payload?.capable || !payload.style) {
           return null;
         }
-        return style;
+        return payload.style;
       } catch {
         return null;
       }
@@ -205,7 +205,12 @@ function addVectorHandle(map: mapboxgl.Map, key: string, style: StyleJSON): Laye
     sourceIds.push(sid);
     sourceMap[id] = sid;
     if (!map.getSource(sid)) {
-      map.addSource(sid, src as unknown as AddSourceArg);
+      /* 样式里的瓦片模板指向 iServer 源站：http 目标过同源代理，https 直连 */
+      const tiles = (src as { tiles?: string[] }).tiles?.map((t) => sameOriginUrl(t));
+      map.addSource(sid, {
+        ...(src as object),
+        ...(tiles ? { tiles } : {}),
+      } as unknown as AddSourceArg);
     }
   }
   const layers: { id: string; type: string }[] = [];
