@@ -211,9 +211,15 @@ function addVectorHandle(map: mapboxgl.Map, key: string, style: StyleJSON): Laye
   const layers: { id: string; type: string }[] = [];
   (style.layers ?? []).forEach((lyr, i) => {
     const rec = lyr as { source?: string; type?: string };
+    /* background 层跳过：每个官方样式都自带一块不透明背景，多服务合并时
+     * 后加的会把整个地图连同下方所有要素盖住（实测满屏橄榄绿）——底图
+     * 职责归栅格底图，样式只贡献要素层。 */
+    if (rec.type === 'background') {
+      return;
+    }
     const lid = `${key}:lyr-${i}`;
-    /* background 等图层本无 source：原样保留（补 undefined 会被引擎整层
-     * 拒绝——实测 cqyqk 样式首层即 background，曾有 116 条校验错误）。 */
+    /* background 之外的图层若仍无 source（异常样式），原样保留缺省
+     * （补 undefined 会被引擎整层拒绝——曾有 116 条校验错误）。 */
     const merged: Record<string, unknown> = { ...lyr, id: lid };
     if (rec.source) {
       merged.source = sourceMap[rec.source] ?? rec.source;
