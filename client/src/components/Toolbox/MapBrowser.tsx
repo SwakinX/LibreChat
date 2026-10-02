@@ -472,6 +472,9 @@ export default function MapBrowser() {
   const layersRef = useRef(layers);
   layersRef.current = layers;
   const [mapReady, setMapReady] = useState(0);
+  /* 文本图层依赖的 glyphs/sprite（style 级配置）。undefined 时地图以空样式
+   * 先行创建；异步解析到后触发一次重建。 */
+  const [glyphsUrl, setGlyphsUrl] = useState<{ glyphs?: string; sprite?: string }>({});
   /* 行把手 Pointer 拖拽（不用 HTML5 DnD：拖影/命中受全局样式与浏览器差异影响）：
    * 把手上按下即捕获指针，移动中命中哪行就交换到哪行，抬起结束。 */
   const dragKeyRef = useRef<string | null>(null);
@@ -517,34 +520,16 @@ export default function MapBrowser() {
     let removeFullscreenHook: (() => void) | null = null;
 
     (async () => {
-      /* glyphs/sprite 是 style 级配置且 v1 建图后不可改：在底图组 + 持久化
-       * 矢量瓦片图层里找第一个 vectorstyles 可用且带 glyphs 的服务（dom 等
-       * 纯栅格底图无样式，自动跳过）。REST 服务是否支持矢量逐服务判断，
-       * 判断标志即 vectorstyles 可出（iServer "for MapboxGL" 预览入口同源）；
-       * 探测同时预热缓存——之后建层零额外请求。 */
-      let glyphs: string | undefined;
-      let sprite: string | undefined;
-      const glyphCandidates = [
-        ...basemapEntries.map((b) => b.url).filter(Boolean),
-        ...layersRef.current.filter((l) => l.kind === 'tiled' && l.url).map((l) => l.url as string),
-      ];
-      for (const u of glyphCandidates) {
-        const s = await getVectorStyle(u);
-        if (s?.glyphs) {
-          glyphs = s.glyphs;
-          sprite = s.sprite;
-          break;
-        }
-      }
-      if (cancelled) {
-        return;
-      }
+      /* 建图不等待任何探测（探测慢时面板整片空白，实测）：以当前 glyphs
+       * 状态立起画布。glyphs/sprite 是 style 级配置且 v1 建图后不可改——
+       * 由独立探测 effect 异步解析（glyphsUrl 状态），解析到后地图重建一次
+       * （deps 含 glyphsUrl），文本图层自此可加。 */
       const style = {
         version: 8 as const,
         sources: {},
         layers: [],
-        ...(glyphs ? { glyphs } : {}),
-        ...(sprite ? { sprite } : {}),
+        ...(glyphsUrl.glyphs ? { glyphs: glyphsUrl.glyphs } : {}),
+        ...(glyphsUrl.sprite ? { sprite: glyphsUrl.sprite } : {}),
       };
       const map = new mapboxgl.Map({
         container: el,
@@ -610,9 +595,39 @@ export default function MapBrowser() {
       inst.clear();
       fittedSet.clear();
     };
-    // basemapEntries 变化即换底图组（与 Leaflet 版语义一致）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config]);
+    // basemapEntries 变化即换底图组（与 Leaflet 版语义一致）；glyphsUrl 解析
+    // 到值时重建一次（文本图层依赖 style 级 glyphs）
+  }, [config, glyphsUrl]);
+
+  /* glyphs 解析（非阻塞，不挡建图）：在底图组 + 已配置瓦片图层里找第一个
+   * vectorstyles 可出且带 glyphs 的服务。结果置入 glyphsUrl → 地图重建。 */
+  const glyphCandidatesKey = [
+    ...basemapEntries.map((b) => b.url ?? ''),
+    ...layers.filter((l) => l.kind === 'tiled').map((l) => l.url ?? ''),
+  ].join('|');
+  useEffect(() => {
+    let probeCancelled = false;
+    (async () => {
+      for (const u of glyphCandidatesKey.split('|')) {
+        if (!u) {
+          continue;
+        }
+        const s = await getVectorStyle(u);
+        if (probeCancelled) {
+          return;
+        }
+        if (s?.glyphs) {
+          setGlyphsUrl((prev) =>
+            prev.glyphs === s.glyphs ? prev : { glyphs: s.glyphs, sprite: s.sprite },
+          );
+          return;
+        }
+      }
+    })();
+    return () => {
+      probeCancelled = true;
+    };
+  }, [glyphCandidatesKey]);
 
   const baseLayer = layers.find((l) => l.kind === 'base');
 
