@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 /* SuperMap mapbox-gl-enhance（同 MapBrowser）：crs 度网格支持，官方
  * 01_tiledMapLayer_4490 示例同款。 */
-import mapboxgl from '../../libs/mapbox-gl-enhance';
+import mapboxgl from '../../libs/mapboxgl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import '../../libs/mapbox-gl-enhance.css';
 import { useLocalize } from '~/hooks';

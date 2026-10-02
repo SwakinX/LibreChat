@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 /* SuperMap mapbox-gl-enhance：mapbox-gl 1.12.1 定制构建（window.mapboxgl
  * 官方示例同款，内置 crs 度网格支持——官方 01_tiledMapLayer_4490 示例即此
- * 用法）。不用 npm mapbox-gl 裸版：它没有 CRS，4490 服务瓦片对不上网格。 */
-import mapboxgl from '../../libs/mapbox-gl-enhance';
+ * 用法）。不用 npm mapbox-gl 裸版：它没有 CRS，4490 服务瓦片对不上网格。
+ * 经 libs/mapboxgl 包装：workerUrl 指向 public 原始副本（vite 打包会弄坏
+ * 内联 worker，矢量瓦片解析全灭而栅格正常——实测）。 */
+import mapboxgl from '../../libs/mapboxgl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import '../../libs/mapbox-gl-enhance.css';
 import { request } from 'librechat-data-provider';
