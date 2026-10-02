@@ -673,8 +673,12 @@ export default function MapBrowser() {
               rasterTileDigest(b.url, z, Math.min(n - 1, tx + 2), ty),
             ]);
             if (d1 && d2 && d1 === d2) {
+              /* 服务端忽略 x/y（5.212 老 iServer 无 3857 网格能力，多形式探
+               * 测证实）——铺出来只会是全球同一张图，摘掉并以提示代替。 */
+              removeHandle(map, handle);
+              baseHandlesRef.current.delete(key);
               setNotice(
-                `底图「${b.name || '底图'}」的栅格瓦片服务端异常（不同瓦片返回相同内容），请在底图管理切换（如北京大屏地图）`,
+                `底图「${b.name || '底图'}」的栅格服务不支持 MapboxGL 出图（不同瓦片返回相同内容），请在底图管理切换（如北京大屏地图）`,
               );
             }
           })
