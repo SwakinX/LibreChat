@@ -121,6 +121,32 @@ function rasterTileTemplate(url: string): string {
   return `${base}/zxyTileImage.png?prjCoordSys=${prj}&z={z}&x={x}&y={y}&width=256&height=256&transparent=true`;
 }
 
+/** 栅格瓦片摘要（sanity 判断用）：z6 起步按模板取单瓦片并哈希；失败返回
+ * null（探测不阻塞出图）。 */
+async function rasterTileDigest(
+  url: string,
+  z: number,
+  x: number,
+  y: number,
+): Promise<string | null> {
+  try {
+    const u = rasterTileTemplate(url)
+      .replace('{z}', String(z))
+      .replace('{x}', String(x))
+      .replace('{y}', String(y));
+    const resp = await fetchWithTimeout(u, 15000);
+    if (!resp.ok) {
+      return null;
+    }
+    const digest = await crypto.subtle.digest('SHA-256', await resp.arrayBuffer());
+    return Array.from(new Uint8Array(digest).slice(0, 16))
+      .map((v) => v.toString(16).padStart(2, '0'))
+      .join('');
+  } catch {
+    return null;
+  }
+}
+
 /** 官方矢量瓦片样式：tileFeature/vectorstyles.json（InitMap type=vector-tile
  * 同参数，tileURLTemplate=ZXY 出 Mercator 网格瓦片模板）。取不到（404/超时/
  * 非 style JSON）返回 null，调用方回落栅格。结果按 URL 缓存全会话复用。 */
@@ -186,11 +212,13 @@ function addVectorHandle(map: mapboxgl.Map, key: string, style: StyleJSON): Laye
   (style.layers ?? []).forEach((lyr, i) => {
     const rec = lyr as { source?: string; type?: string };
     const lid = `${key}:lyr-${i}`;
-    map.addLayer({
-      ...lyr,
-      id: lid,
-      source: sourceMap[rec.source ?? ''] ?? rec.source,
-    } as unknown as AddLayerArg);
+    /* background 等图层本无 source：原样保留（补 undefined 会被引擎整层
+     * 拒绝——实测 cqyqk 样式首层即 background，曾有 116 条校验错误）。 */
+    const merged: Record<string, unknown> = { ...lyr, id: lid };
+    if (rec.source) {
+      merged.source = sourceMap[rec.source] ?? rec.source;
+    }
+    map.addLayer(merged as unknown as AddLayerArg);
     layers.push({ id: lid, type: rec.type ?? 'background' });
   });
   return { sourceIds, layers, kind: 'vector' };
@@ -486,18 +514,20 @@ export default function MapBrowser() {
     let removeFullscreenHook: (() => void) | null = null;
 
     (async () => {
-      /* glyphs/sprite 是 style 级配置且 v1 建图后不可改：取底图组里第一个
-       * vectorstyles 可用服务的（dom 等纯栅格底图无样式，自动跳过）。
-       * vectorstyles 是否可出即官方对"该 REST 服务是否支持矢量瓦片"的判断
-       * 标志（iServer 页面 for MapboxGL 预览入口同源），探测同时预热缓存。 */
+      /* glyphs/sprite 是 style 级配置且 v1 建图后不可改：在底图组 + 持久化
+       * 矢量瓦片图层里找第一个 vectorstyles 可用且带 glyphs 的服务（dom 等
+       * 纯栅格底图无样式，自动跳过）。REST 服务是否支持矢量逐服务判断，
+       * 判断标志即 vectorstyles 可出（iServer "for MapboxGL" 预览入口同源）；
+       * 探测同时预热缓存——之后建层零额外请求。 */
       let glyphs: string | undefined;
       let sprite: string | undefined;
-      for (const b of basemapEntries) {
-        if (!b.url) {
-          continue;
-        }
-        const s = await getVectorStyle(b.url);
-        if (s) {
+      const glyphCandidates = [
+        ...basemapEntries.map((b) => b.url).filter(Boolean),
+        ...layersRef.current.filter((l) => l.kind === 'tiled' && l.url).map((l) => l.url as string),
+      ];
+      for (const u of glyphCandidates) {
+        const s = await getVectorStyle(u);
+        if (s?.glyphs) {
           glyphs = s.glyphs;
           sprite = s.sprite;
           break;
@@ -602,13 +632,46 @@ export default function MapBrowser() {
           pendingTiles.current.set(key, creating);
         }
         creating
-          .then((handle) => {
+          .then(async (handle) => {
             pendingTiles.current.delete(key);
             if (mapRef.current !== map) {
               return;
             }
             baseHandlesRef.current.set(key, handle);
             setMapReady((n) => n + 1);
+            if (handle.kind !== 'raster' || !b.url) {
+              return;
+            }
+            /* 栅格 sanity 判断（用户定的原则：是否可用要判断）：取配置中心
+             * 附近两张不同瓦片做摘要，逐字节相同 = 服务端 zxyTileImage 异常
+             * （5.212 dom 实测如此：忽略 x/y 恒回同一图），明示换底图而非
+             * 默默铺坏瓦片。中心保证在服务范围内，避开出界空瓦片误判。 */
+            const [cfgLat, cfgLng] = config?.center?.length ? config.center : [0, 0];
+            const cfgValid = Math.abs(cfgLat) + Math.abs(cfgLng) > 1e-6;
+            const lng = cfgValid ? cfgLng : 104.0;
+            const lat = cfgValid ? cfgLat : 30.6;
+            const z = Math.min(10, Math.max(3, Math.round(config?.zoom ?? 7) + 1));
+            const n = 2 ** z;
+            const tx = Math.floor(((lng + 180) / 360) * n);
+            const latRad = (lat * Math.PI) / 180;
+            const ty = Math.max(
+              0,
+              Math.min(
+                n - 1,
+                Math.floor(
+                  ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n,
+                ),
+              ),
+            );
+            const [d1, d2] = await Promise.all([
+              rasterTileDigest(b.url, z, tx, ty),
+              rasterTileDigest(b.url, z, Math.min(n - 1, tx + 2), ty),
+            ]);
+            if (d1 && d2 && d1 === d2) {
+              setNotice(
+                `底图「${b.name || '底图'}」的栅格瓦片服务端异常（不同瓦片返回相同内容），请在底图管理切换（如北京大屏地图）`,
+              );
+            }
           })
           .catch((error) => {
             pendingTiles.current.delete(key);
@@ -624,7 +687,7 @@ export default function MapBrowser() {
         console.warn('[MapBrowser] 底图同步失败:', b.name || i, error);
       }
     });
-  }, [basemapEntries, baseVisibility, baseLayer, mapReady]);
+  }, [basemapEntries, baseVisibility, baseLayer, mapReady, config]);
 
   /* 瓦片图层同步：增删/显隐/透明度（vectorstyles 可用即矢量瓦片，否则栅格）。 */
   useEffect(() => {
