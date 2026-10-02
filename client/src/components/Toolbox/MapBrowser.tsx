@@ -78,12 +78,19 @@ type MapLayer = {
 const isMvtUrl = (url: string) => url.toLowerCase().includes('mvt');
 
 /** 矢量瓦片取数走 fetch：HTTPS 页面直连 http 内网地址会被 Chrome 混合内容
- * 拦截（栅格 <img> 豁免、矢量不豁免），改经 nginx /iserver/ 同源反代取
- * （上游即 iServer 实例，2026-09-30 实测）。 */
+ * 拦截（栅格 <img> 豁免、矢量不豁免），http 服务经 nginx /iserver/ 同源反代
+ * 取（上游固定一台 iServer，2026-09-30 实测）。https 服务不重写——没有混合
+ * 内容问题，直连即可（需受信证书+iServer CORS，2026-10-01 5.28 实测），且
+ * 单一上游的反代也代不了别的实例。 */
 function sameOriginUrl(url: string): string {
   try {
     const parsed = new URL(url);
-    if (parsed.origin !== window.location.origin && parsed.pathname.startsWith('/iserver/')) {
+    if (
+      window.location.protocol === 'https:' &&
+      parsed.protocol === 'http:' &&
+      parsed.origin !== window.location.origin &&
+      parsed.pathname.startsWith('/iserver/')
+    ) {
       return window.location.origin + parsed.pathname;
     }
   } catch {
