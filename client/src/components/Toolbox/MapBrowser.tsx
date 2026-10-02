@@ -28,6 +28,8 @@ import type {
   ReactNode,
 } from 'react';
 import 'mapbox-gl/dist/mapbox-gl.css';
+/* 官方可视化示例同款样式表（Logo 等控件依赖，technical-topics 引入清单之一）。 */
+import '@supermapgis/iclient-mapboxgl/dist/iclient-mapboxgl.min.css';
 import { Logo } from '@supermapgis/iclient-mapboxgl';
 import {
   useChoicesFrom,
@@ -484,8 +486,23 @@ export default function MapBrowser() {
     let removeFullscreenHook: (() => void) | null = null;
 
     (async () => {
-      const firstUrl = basemapEntries[0]?.url;
-      const firstStyle = firstUrl ? await getVectorStyle(firstUrl) : null;
+      /* glyphs/sprite 是 style 级配置且 v1 建图后不可改：取底图组里第一个
+       * vectorstyles 可用服务的（dom 等纯栅格底图无样式，自动跳过）。
+       * vectorstyles 是否可出即官方对"该 REST 服务是否支持矢量瓦片"的判断
+       * 标志（iServer 页面 for MapboxGL 预览入口同源），探测同时预热缓存。 */
+      let glyphs: string | undefined;
+      let sprite: string | undefined;
+      for (const b of basemapEntries) {
+        if (!b.url) {
+          continue;
+        }
+        const s = await getVectorStyle(b.url);
+        if (s) {
+          glyphs = s.glyphs;
+          sprite = s.sprite;
+          break;
+        }
+      }
       if (cancelled) {
         return;
       }
@@ -493,14 +510,16 @@ export default function MapBrowser() {
         version: 8 as const,
         sources: {},
         layers: [],
-        ...(firstStyle?.glyphs ? { glyphs: firstStyle.glyphs } : {}),
-        ...(firstStyle?.sprite ? { sprite: firstStyle.sprite } : {}),
+        ...(glyphs ? { glyphs } : {}),
+        ...(sprite ? { sprite } : {}),
       };
       const map = new mapboxgl.Map({
         container: el,
         style: style as never,
         center,
         zoom,
+        /* 官方可视化示例同款：attributionControl 关闭。 */
+        attributionControl: false,
       });
       map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
       map.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }), 'bottom-left');
