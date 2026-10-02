@@ -568,11 +568,12 @@ export default function MapBrowser() {
           .setHTML(text)
           .addTo(map);
       });
-      /* 全屏切换后容器尺寸变化，引擎需显式重算。 */
-      const onFullscreenChange = () => map.resize();
-      document.addEventListener('fullscreenchange', onFullscreenChange);
-      removeFullscreenHook = () =>
-        document.removeEventListener('fullscreenchange', onFullscreenChange);
+      /* 容器尺寸随布局/全屏变化时引擎需显式重算（建图早于布局定型时画布
+       * 会停在初始尺寸，实测卡在 300px 条）；ResizeObserver 覆盖所有来源
+       * （含全屏），比单一 fullscreenchange 监听全面。 */
+      const ro = new ResizeObserver(() => map.resize());
+      ro.observe(el);
+      removeFullscreenHook = () => ro.disconnect();
       mapRef.current = map;
       /* addSource/addLayer 必须等 style 就绪，否则 "Style is not done
        * loading"（实测）。mapReady 只在 load 后置位——各同步 effect 以此
@@ -1312,6 +1313,10 @@ export default function MapBrowser() {
             <div
               ref={containerRef}
               className="absolute inset-0 rounded-lg border border-border-medium"
+              /* mapbox-gl.css 的 .mapboxgl-map{position:relative} 与 .absolute
+               * 同特异性，懒加载 chunk 的样式表在后必胜——实测容器塌成 2px
+               * 高、地图视口为空。内联样式兜底，任何构建序下都成立。 */
+              style={{ position: 'absolute', inset: 0 }}
             />
             <button
               type="button"

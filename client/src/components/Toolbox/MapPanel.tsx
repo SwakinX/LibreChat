@@ -261,6 +261,9 @@ export default function MapPanel({
     <div
       ref={containerRef}
       className={className ?? 'h-72 w-full rounded-lg border border-border-medium'}
+      /* 同 MapBrowser：.mapboxgl-map 会覆写 position（构建序决定胜负），
+       * 内联样式兜底。 */
+      style={className ? undefined : { position: 'relative', width: '100%', height: '18rem' }}
     />
   );
 }
