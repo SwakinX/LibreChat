@@ -464,8 +464,9 @@ export function sourcemapExclude(opts?: SourcemapExclude): Plugin {
 /**
  * Production builds set `publicDir: false`, so nothing under public/ reaches dist on its
  * own. This copies what the server actually has to serve: all of public/assets (the PWA
- * icons plus the endpoint, tool and language logos referenced at runtime) and robots.txt.
- * public/fonts is deliberately left out, since fonts are emitted as bundle assets through
+ * icons plus the endpoint, tool and language logos referenced at runtime), public/libs
+ * (the vendored mapbox-gl-enhance engine, runtime <script>-loaded by the map panel) and
+ * robots.txt. public/fonts is deliberately left out, since fonts are emitted as bundle assets through
  * the `$fonts` alias.
  *
  * The copy MUST happen inside the build. vite-plugin-pwa globs dist/ for
@@ -486,6 +487,9 @@ export function copyPublicAssets(): Plugin {
     },
     async writeBundle() {
       await fs.promises.cp(path.join(publicDir, 'assets'), path.join(outDir, 'assets'), {
+        recursive: true,
+      });
+      await fs.promises.cp(path.join(publicDir, 'libs'), path.join(outDir, 'libs'), {
         recursive: true,
       });
       await fs.promises.copyFile(
