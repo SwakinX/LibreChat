@@ -3,10 +3,12 @@
  *
  * vite/rollup 打包会破坏增强库内联的 blob worker 脚本（矢量瓦片解析全在
  * worker 里，坏掉时控制台 "B is not defined"、矢量层全灭而栅格正常——栅格
- * 在主线程加载）。这里把 worker 指向 public 下的原始未打包副本（与打包
- * 副本同版本），官方示例页加载原始文件即无此问题。 */
+ * 在主线程加载）。worker 改用原始文件：经 vite ?url 资产导入（构建必然
+ * emit 并返回真实 URL，public/ 目录方案曾因文件未进 dist 而 404——worker
+ * 拉不到时引擎 load 永不触发、整图静默空白且无任何报错）。 */
+import enhanceWorkerUrl from './mapbox-gl-enhance.js?url';
 import mapboxgl from './mapbox-gl-enhance';
 
-(mapboxgl as unknown as { workerUrl: string }).workerUrl = '/libs/mapbox-gl-enhance.js';
+(mapboxgl as unknown as { workerUrl: string }).workerUrl = enhanceWorkerUrl;
 
 export default mapboxgl;
