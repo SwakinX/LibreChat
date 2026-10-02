@@ -480,6 +480,9 @@ export default function MapBrowser() {
     const inst = handlesRef.current;
     const baseInst = baseHandlesRef.current;
     const fittedSet = fitted.current;
+    /* cleanup 里要清在途创建任务；lint 要求 cleanup 不直接引用 ref.current
+     * （Map 实例终身不变，别名安全）。 */
+    const pending = pendingTiles.current;
     const [cx, cy] = config.center.length ? config.center : [0, 0];
     /* 无效中心（未配置 [0,0]、iServer 未配的 [0,-90] 等）回落默认——Leaflet
      * 时代的四川全省视野（2026-09-29 用户指定）。lng=0 或 lat=0 的配置视为
@@ -577,6 +580,9 @@ export default function MapBrowser() {
       baseInst.clear();
       inst.clear();
       fittedSet.clear();
+      /* 在途创建任务一并作废：否则其 resolve 后会对已拆除的旧地图 addSource
+       * （实测 "Style is not done loading"），新地图还会复用死任务致图层缺失 */
+      pending.clear();
     };
     // basemapEntries 变化即换底图组（与 Leaflet 版语义一致）；glyphsUrl 解析
     // 到值时重建一次（文本图层依赖 style 级 glyphs）
@@ -652,6 +658,11 @@ export default function MapBrowser() {
         if (!creating) {
           creating = (async () => {
             const style = await getVectorStyle(b.url as string);
+            /* 探测期间地图可能已被 glyphs 重建摘除——对拆除后的地图 addSource
+             * 会抛 "Style is not done loading"（实测）。 */
+            if (mapRef.current !== map) {
+              throw new Error('stale-map');
+            }
             return style
               ? addVectorHandle(map, key, style)
               : addRasterHandle(map, key, b.url as string);
@@ -669,8 +680,10 @@ export default function MapBrowser() {
           })
           .catch((error) => {
             pendingTiles.current.delete(key);
-            /* 单幅底图异常只影响自身，不塌面板 */
-            console.warn('[MapBrowser] 底图创建失败:', b.name || i, error);
+            /* 单幅底图异常只影响自身，不塌面板；地图代次更替的过期任务静默 */
+            if ((error as Error).message !== 'stale-map') {
+              console.warn('[MapBrowser] 底图创建失败:', b.name || i, error);
+            }
           });
         return;
       }
@@ -710,6 +723,11 @@ export default function MapBrowser() {
         if (!creating) {
           creating = (async () => {
             const style = await getVectorStyle(l.url as string);
+            /* 同 base：探测期间地图被重建摘除时静默放弃（见 cleanup 清
+             * pendingTiles）。 */
+            if (mapRef.current !== map) {
+              throw new Error('stale-map');
+            }
             return style
               ? addVectorHandle(map, key, style)
               : addRasterHandle(map, key, l.url as string);
@@ -730,7 +748,10 @@ export default function MapBrowser() {
           })
           .catch((error) => {
             pendingTiles.current.delete(key);
-            console.warn('[MapBrowser] 图层创建失败:', l.name, error);
+            /* 地图代次更替的过期任务静默（cleanup 已清 pending，双保险） */
+            if ((error as Error).message !== 'stale-map') {
+              console.warn('[MapBrowser] 图层创建失败:', l.name, error);
+            }
           });
         return;
       }
