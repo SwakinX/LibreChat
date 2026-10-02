@@ -97,10 +97,14 @@ export default function MapPanel({
     const el = containerRef.current;
     /* iServer 端 dom 服务 center=[0,-90]（服务未配中心）——无效中心用默认视野。
      * Leaflet 时代 center=[lat,lng]；mapbox 是 [lng,lat]。 */
+    /* 无效中心（[0,0] / iServer 未配的 [0,-90]）回落四川全省默认视野；
+     * lng=0 或 lat=0 的配置视为垃圾值。Leaflet 时代 [lat,lng]，mapbox
+     * 是 [lng,lat]。 */
     const [cx, cy] = config.center.length ? config.center : [0, 0];
-    const centerValid = Math.abs(cx) + Math.abs(cy) > 1e-6;
+    const centerValid =
+      Math.abs(cx) > 1e-6 && Math.abs(cy) > 1e-6 && Math.abs(cx) <= 180 && Math.abs(cy) <= 90;
     const center: [number, number] = centerValid ? [cy, cx] : [104.0, 30.6];
-    const zoom = centerValid ? (config.zoom ?? 7) : 7;
+    const zoom = centerValid && (config.zoom ?? 0) > 0 ? (config.zoom as number) : 7;
     /* 底图组（2.19.0）：按序叠放（前者在下）；env 回落时为单幅。 */
     const basemapUrls = (
       config.basemaps?.length ? config.basemaps : [{ name: '', url: config.map_url }]

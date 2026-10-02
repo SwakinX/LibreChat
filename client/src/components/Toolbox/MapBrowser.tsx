@@ -514,10 +514,14 @@ export default function MapBrowser() {
     const baseInst = baseHandlesRef.current;
     const fittedSet = fitted.current;
     const [cx, cy] = config.center.length ? config.center : [0, 0];
-    const centerValid = Math.abs(cx) + Math.abs(cy) > 1e-6;
+    /* 无效中心（未配置 [0,0]、iServer 未配的 [0,-90] 等）回落默认——Leaflet
+     * 时代的四川全省视野（2026-09-29 用户指定）。lng=0 或 lat=0 的配置视为
+     * 垃圾值（会把地图带到几内亚湾/赤道）。 */
+    const centerValid =
+      Math.abs(cx) > 1e-6 && Math.abs(cy) > 1e-6 && Math.abs(cx) <= 180 && Math.abs(cy) <= 90;
     /* Leaflet 时代 center=[lat,lng]；mapbox 是 [lng,lat]。 */
     const center: [number, number] = centerValid ? [cy, cx] : [104.0, 30.6];
-    const zoom = centerValid ? (config.zoom ?? 7) : 7;
+    const zoom = centerValid && (config.zoom ?? 0) > 0 ? (config.zoom as number) : 7;
     /* 地图异步创建；全屏监听要随 effect cleanup 摘除（async IIFE 的返回值
      * 无人接收，不能靠它清理）。 */
     let removeFullscreenHook: (() => void) | null = null;
