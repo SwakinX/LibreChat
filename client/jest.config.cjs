@@ -27,6 +27,10 @@ module.exports = {
   // },
   moduleNameMapper: {
     '\\.(css)$': 'identity-obj-proxy',
+    /** 测试不触地图行为：mapbox-gl/iclient-mapboxgl 真库在 jsdom import 期
+     * 访问浏览器 API 会整组加载失败，统一映射到桩（test/mapbox-gl-stub.cjs）。 */
+    '^mapbox-gl$': '<rootDir>/test/mapbox-gl-stub.cjs',
+    '^@supermapgis/iclient-mapboxgl$': '<rootDir>/test/mapbox-gl-stub.cjs',
     /** Mirror the vite resolve.alias so tests parse math with the same tokenizer as production. */
     '^micromark-extension-math$': 'micromark-extension-llm-math',
     '\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga)$':

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import L from 'leaflet';
+import mapboxgl from 'mapbox-gl';
 import {
   Button,
   OGDialog,
@@ -27,11 +27,8 @@ import type {
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from 'react';
-import 'leaflet/dist/leaflet.css';
-import '@supermapgis/iclient-leaflet';
-/* 深引 FetchRequest 与图层内部共享同一模块实例（webpack 按解析路径去重），
- * 下方对 get 的超时补丁才作用到矢量瓦片取数上。 */
-import { FetchRequest } from '@supermapgis/iclient-common/util/FetchRequest';
+import 'mapbox-gl/dist/mapbox-gl.css';
+import { Logo } from '@supermapgis/iclient-mapboxgl';
 import {
   useChoicesFrom,
   useExecuteTool,
@@ -45,37 +42,7 @@ import {
 } from './api';
 import { useLocalize } from '~/hooks';
 
-/* @supermapgis/iclient-leaflet 无 TS 类型：官方 API 最小声明（同 MapPanel）。 */
-type IClient = {
-  supermap: {
-    tiledMapLayer: (url: string) => L.TileLayer;
-    /** 矢量瓦片图层（iServer MVT 服务，2.20.0）。 */
-    tiledVectorLayer: (
-      url: string,
-      options?: { format?: string; serverCartoCSSStyle?: boolean; timeout?: number },
-    ) => L.TileLayer;
-    initMap: (
-      url: string,
-      options?: { mapOptions?: Record<string, unknown>; layerOptions?: Record<string, unknown> },
-    ) => Promise<{ map: L.Map; layer: L.TileLayer }>;
-  };
-};
-
 type LayerKind = 'base' | 'tiled' | 'vector';
-
-/** 矢量瓦片取数超时兜底。VectorTilePBF.getTile 写死 FetchRequest timeout
- * 10000（_timeout 参数按毫秒计），且超时只放弃 promise、不断底层请求——
- * 动态生成慢的服务（5.28 a4work改前 z7 级单瓦片 >10s 实测）表现为"网络里
- * 有瓦片、图面空白"。对恰好 10s 的请求放宽到 60s；其余请求的超时来自各自
- * options（本文件显式传 60000 的 initLayersInfo 不经此分支）。 */
-const TILE_FETCH_TIMEOUT_MS = 60000;
-const origFetchRequestGet: typeof FetchRequest.get = FetchRequest.get.bind(FetchRequest);
-FetchRequest.get = function (url: string, params?: unknown, options?: { timeout?: number }) {
-  if (options?.timeout === 10000) {
-    return origFetchRequestGet(url, params, { ...options, timeout: TILE_FETCH_TIMEOUT_MS });
-  }
-  return origFetchRequestGet(url, params, options);
-} as typeof FetchRequest.get;
 
 /** 图层状态（可持久化；矢量要素数据不入 localStorage——恢复时按 reg 重查）。 */
 type MapLayer = {
@@ -91,14 +58,33 @@ type MapLayer = {
   color: string;
 };
 
-/** 矢量地图服务判定（map-mvt-* 等服务名/URL 含 mvt 段，2.20.0）。 */
-const isMvtUrl = (url: string) => url.toLowerCase().includes('mvt');
+/** 官方 vectorstyles.json 返回结构的最小声明（iclient-mapboxgl InitMap 同源）。 */
+type StyleJSON = {
+  version: number;
+  sources: Record<string, Record<string, unknown>>;
+  layers: Record<string, unknown>[];
+  glyphs?: string;
+  sprite?: string;
+};
 
-/** 矢量瓦片取数走 fetch：HTTPS 页面直连 http 内网地址会被 Chrome 混合内容
- * 拦截（栅格 <img> 豁免、矢量不豁免），http 服务经 nginx /iserver/ 同源反代
- * 取（上游固定一台 iServer，2026-09-30 实测）。https 服务不重写——没有混合
- * 内容问题，直连即可（需受信证书+iServer CORS，2026-10-01 5.28 实测），且
- * 单一上游的反代也代不了别的实例。 */
+/** 引擎侧图层句柄：一个图层状态对应的一组 mapbox style 资源。 */
+type LayerHandle = {
+  sourceIds: string[];
+  /** style 图层 id + 类型（显隐走 layout，透明度/着色按类型写 paint）。 */
+  layers: { id: string; type: string }[];
+  kind: 'raster' | 'vector' | 'geojson';
+};
+
+/* @types/mapbox-gl 各版本对 Layer/Source 联合类型的命名差异大（v1 AnyLayer、
+ * v3 改名），统一取 addLayer/addSource 的参数类型做断言——运行时对象来自
+ * 官方样式或本文件构造，类型层面只求版本无关。 */
+type AddLayerArg = Parameters<mapboxgl.Map['addLayer']>[0];
+type AddSourceArg = Parameters<mapboxgl.Map['addSource']>[1];
+
+/** 矢量取数走 fetch：HTTPS 页面直连 http 内网地址会被 Chrome 混合内容
+ * 拦截，http 服务经 nginx /iserver/ 同源反代取（上游固定一台 iServer，
+ * 2026-09-30 实测）。https 服务不重写——直连即可（需受信证书+iServer
+ * CORS），且单一上游的反代也代不了别的实例。 */
 function sameOriginUrl(url: string): string {
   try {
     const parsed = new URL(url);
@@ -116,130 +102,268 @@ function sameOriginUrl(url: string): string {
   return url;
 }
 
-/** 带超时的 fetch（探测请求不能拖住图层创建）。 */
+/** 带超时的 fetch（样式探测不能拖住建图）。 */
 function fetchWithTimeout(url: string, ms: number): Promise<Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
   return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
 }
 
-/** 矢量瓦片能力探测结果缓存（每个服务 URL 一次，全会话复用）。 */
-const vectorTileSupport = new Map<string, Promise<boolean>>();
+/** 栅格 ZXY 模板（官方 iclient-mapboxgl README 同款）：zxyTileImage.png +
+ * prjCoordSys 3857——服务端把 4326/4490 底图重投影进 Mercator 瓦片网格，
+ * 这是度坐标系服务上 Mercator 引擎的官方出图路径。{z}/{x}/{y} 模板记号
+ * 必须保持字面量（mapbox-gl 运行时替换），故手工拼串不走 URLSearchParams。 */
+function rasterTileTemplate(url: string): string {
+  const base = sameOriginUrl(url).replace(/\/+$/, '');
+  const prj = encodeURIComponent(JSON.stringify({ epsgCode: 3857 }));
+  return `${base}/zxyTileImage.png?prjCoordSys=${prj}&z={z}&x={x}&y={y}&width=256&height=256&transparent=true`;
+}
 
-/** 服务能否出矢量瓦片（结果按 URL 缓存）。 */
-function supportsVectorTiles(url: string): Promise<boolean> {
-  let p = vectorTileSupport.get(url);
+/** 官方矢量瓦片样式：tileFeature/vectorstyles.json（InitMap type=vector-tile
+ * 同参数，tileURLTemplate=ZXY 出 Mercator 网格瓦片模板）。取不到（404/超时/
+ * 非 style JSON）返回 null，调用方回落栅格。结果按 URL 缓存全会话复用。 */
+const vectorStyleCache = new Map<string, Promise<StyleJSON | null>>();
+
+function getVectorStyle(url: string): Promise<StyleJSON | null> {
+  let p = vectorStyleCache.get(url);
   if (!p) {
-    p = probeVectorTiles(url);
-    vectorTileSupport.set(url, p);
+    p = (async () => {
+      try {
+        const base = sameOriginUrl(url).replace(/\/+$/, '');
+        const resp = await fetchWithTimeout(
+          `${base}/tileFeature/vectorstyles.json?type=MapBox_GL&styleonly=true&tileURLTemplate=ZXY`,
+          15000,
+        );
+        if (!resp.ok) {
+          return null;
+        }
+        const style = (await resp.json()) as StyleJSON | null;
+        if (!style || style.version !== 8 || !style.sources || !style.layers) {
+          return null;
+        }
+        return style;
+      } catch {
+        return null;
+      }
+    })();
+    vectorStyleCache.set(url, p);
   }
   return p;
 }
 
-/** 探测：数据源为矢量的 REST 地图服务都能出 tileFeature.mvt（2026-10-01
- * 用户指定，不按服务名 mvt 限死）。请求整幅 viewBounds 的 MVT，有字节即
- * 支持；空/404/超时回落栅格切图（栅格当前总是可用，不回归）。 */
-async function probeVectorTiles(url: string): Promise<boolean> {
-  if (isMvtUrl(url)) {
-    /* mvt 服务本身就是矢量瓦片服务（缓存缺失时该服务整体无图，探测无意义） */
-    return true;
-  }
-  try {
-    const base = sameOriginUrl(url).replace(/\/+$/, '');
-    const meta = (await fetchWithTimeout(`${base}.json`, 8000).then((r) =>
-      r.ok ? r.json() : null,
-    )) as {
-      coordUnit?: string;
-      viewBounds?: { left?: number; bottom?: number; right?: number; top?: number };
-    } | null;
-    const v = meta?.viewBounds;
-    if (
-      !v ||
-      typeof v.left !== 'number' ||
-      typeof v.bottom !== 'number' ||
-      typeof v.right !== 'number' ||
-      typeof v.top !== 'number'
-    ) {
-      return false;
-    }
-    /* 整幅出图（范围全宽进一张 512 请求）：分辨率=范围宽/512，换算
-     * SuperMap scale（DEGREE 用米/度，METER 直接 1）。 */
-    const resolution = Math.abs(v.right - v.left) / 512;
-    const meterPerUnit = meta?.coordUnit === 'METER' ? 1 : (Math.PI * 6378137.0) / 180.0;
-    const scale = 1 / (resolution * 96 * (1 / 0.0254) * meterPerUnit);
-    const q = new URLSearchParams({
-      origin: JSON.stringify({ x: -180, y: 90 }),
-      returnAttributes: 'false',
-      cacheEnabled: 'false',
-      width: '512',
-      height: '512',
-      viewBounds: JSON.stringify({ left: v.left, bottom: v.bottom, right: v.right, top: v.top }),
-      scale: String(scale),
-    });
-    const resp = await fetchWithTimeout(`${base}/tileFeature.mvt?${q.toString()}`, 15000);
-    if (!resp.ok) {
-      return false;
-    }
-    return (await resp.arrayBuffer()).byteLength > 0;
-  } catch {
-    return false;
-  }
+/** 栅格瓦片图层（zxyTileImage 官方模板）。 */
+function addRasterHandle(map: mapboxgl.Map, key: string, url: string): LayerHandle {
+  const sourceId = `${key}:src`;
+  const layerId = `${key}:lyr`;
+  map.addSource(sourceId, {
+    type: 'raster',
+    tiles: [rasterTileTemplate(url)],
+    tileSize: 256,
+    attribution: '© SuperMap iServer',
+  } as unknown as AddSourceArg);
+  map.addLayer({ id: layerId, type: 'raster', source: sourceId });
+  return { sourceIds: [sourceId], layers: [{ id: layerId, type: 'raster' }], kind: 'raster' };
 }
 
-/** iClient 矢量瓦片图层的内部结构（仅取需要的成员，签名对齐运行时）。 */
-type VectorLayerInternals = {
-  /** _initLayerUrl 拼好的基址：tileFeature.mvt?origin=…&width=… 等（不含 x/y） */
-  _tileUrl: string;
-  _crs: { project(latlng: L.LatLng): L.Point };
-  _getTileUrl: (coords: { x: number; y: number; z: number }) => string;
-  getScaleFromCoords: (coords: { z: number }) => number;
-  _tileCoordsToBounds: (coords: { x: number; y: number; z: number }) => L.LatLngBounds;
-};
-
-/** 逐瓦片请求改写为 viewBounds 形式。动态地图服务不支持 iClient 默认的
- * 瓦片索引（x/y+scale）取数：5.28 实测任意 origin/scale 组合下 x/y 形式的
- * tileFeature.mvt 一律 200+0 字节，viewBounds 形式才出真实数据（单瓦片
- * 898KB，且 scale 不必对齐服务 visibleScales）。按 Leaflet 行列号用当前
- * CRS 算出瓦片地理范围改发 viewBounds——探测（probeVectorTiles）同形，
- * 行为一致。 */
-function rewriteTileUrlToViewBounds(layer: L.TileLayer): void {
-  const vl = layer as unknown as VectorLayerInternals;
-  vl._getTileUrl = (coords) => {
-    if (!vl._crs) {
-      /* onAdd 前不会取瓦片；防御性回落避免渲染线程抛错 */
-      return vl._tileUrl;
+/** 官方矢量瓦片样式并入地图：source/layer id 加 key 前缀防多服务冲突。
+ * 文本图层依赖 glyphs/sprite，它们是 style 级配置——仅首个服务的能在建图
+ * 时声明；后续服务若带文本图层且缺 glyphs，引擎会拒绝该层（错误事件可见），
+ * 其余图层不受影响。 */
+function addVectorHandle(map: mapboxgl.Map, key: string, style: StyleJSON): LayerHandle {
+  const sourceIds: string[] = [];
+  const sourceMap: Record<string, string> = {};
+  for (const [id, src] of Object.entries(style.sources)) {
+    const sid = `${key}:${id}`;
+    sourceIds.push(sid);
+    sourceMap[id] = sid;
+    if (!map.getSource(sid)) {
+      map.addSource(sid, src as unknown as AddSourceArg);
     }
-    const bounds = vl._tileCoordsToBounds(coords);
-    const sw = vl._crs.project(bounds.getSouthWest());
-    const ne = vl._crs.project(bounds.getNorthEast());
-    const viewBounds = JSON.stringify({
-      leftBottom: { x: sw.x, y: sw.y },
-      rightTop: { x: ne.x, y: ne.y },
-    });
-    return `${vl._tileUrl}&viewBounds=${encodeURIComponent(viewBounds)}&scale=${vl.getScaleFromCoords(coords)}`;
+  }
+  const layers: { id: string; type: string }[] = [];
+  (style.layers ?? []).forEach((lyr, i) => {
+    const rec = lyr as { source?: string; type?: string };
+    const lid = `${key}:lyr-${i}`;
+    map.addLayer({
+      ...lyr,
+      id: lid,
+      source: sourceMap[rec.source ?? ''] ?? rec.source,
+    } as unknown as AddLayerArg);
+    layers.push({ id: lid, type: rec.type ?? 'background' });
+  });
+  return { sourceIds, layers, kind: 'vector' };
+}
+
+/** GeoJSON 中出现的几何大类（要素几何为 null/缺失时跳过）。 */
+function geometryKinds(data: unknown): { point: boolean; line: boolean; polygon: boolean } {
+  const kinds = { point: false, line: false, polygon: false };
+  const fc = data as { features?: { geometry?: { type?: string } | null }[] } | null;
+  for (const f of fc?.features ?? []) {
+    switch (f.geometry?.type) {
+      case 'Point':
+      case 'MultiPoint':
+        kinds.point = true;
+        break;
+      case 'LineString':
+      case 'MultiLineString':
+        kinds.line = true;
+        break;
+      case 'Polygon':
+      case 'MultiPolygon':
+        kinds.polygon = true;
+        break;
+      default:
+        break;
+    }
+  }
+  return kinds;
+}
+
+/** GeoJSON 要素范围（fitBounds 用；替代 Leaflet 的 geo.getBounds）。 */
+function geojsonBounds(data: unknown): [number, number, number, number] | null {
+  let w = Infinity;
+  let s = Infinity;
+  let e = -Infinity;
+  let n = -Infinity;
+  const walk = (coords: unknown): void => {
+    if (!Array.isArray(coords) || coords.length === 0) {
+      return;
+    }
+    if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+      const [x, y] = coords as [number, number];
+      w = Math.min(w, x);
+      e = Math.max(e, x);
+      s = Math.min(s, y);
+      n = Math.max(n, y);
+      return;
+    }
+    for (const c of coords) {
+      walk(c);
+    }
   };
+  const fc = data as { features?: { geometry?: { coordinates?: unknown } | null }[] } | null;
+  for (const f of fc?.features ?? []) {
+    walk(f.geometry?.coordinates);
+  }
+  return w <= e && s <= n ? [w, s, e, n] : null;
 }
 
-/** 建瓦片图层：探测支持矢量瓦片的（mvt 服务、数据源为矢量的动态地图服务）
- * 走 iClient 矢量瓦片（https 直连或同源反代 + MVT），其余栅格切图（用户指
- * 定的浏览器直连策略，2026-09-29）。 */
-async function makeTileLayer(url: string): Promise<L.TileLayer> {
-  const iclient = (L as unknown as IClient).supermap;
-  if (await supportsVectorTiles(url)) {
-    const layer = iclient.tiledVectorLayer(sameOriginUrl(url), {
-      /* iServer MVT 服务仅出 tileFeature.mvt（默认 JSON 返回 400，实测）；
-       * serverCartoCSSStyle 关掉：矢量瓦片服务无 vectorstyles 端点（5.28
-       * 动态地图同样 404），开着会永远等不到出图回调，样式回落图层自带
-       * 配置。timeout 管元数据请求（initLayersInfo 拉图层信息，默认 10s
-       * 在慢服务上不够）；逐瓦片的硬编码超时由 FetchRequest 补丁兜住。 */
-      format: 'MVT',
-      serverCartoCSSStyle: false,
-      timeout: TILE_FETCH_TIMEOUT_MS,
-    }) as unknown as L.TileLayer;
-    rewriteTileUrlToViewBounds(layer);
-    return layer;
+/** GeoJSON 图层：source 常驻（重查 setData 原地更新），按出现的几何类型建
+ * circle/line/fill（点=圆点、线=2px、面=25% 填充，延续 Leaflet 版风格）。 */
+function addGeojsonHandle(
+  map: mapboxgl.Map,
+  key: string,
+  data: unknown,
+  color: string,
+): LayerHandle {
+  const sourceId = `${key}:src`;
+  map.addSource(sourceId, { type: 'geojson', data } as unknown as AddSourceArg);
+  const kinds = geometryKinds(data);
+  const layers: { id: string; type: string }[] = [];
+  const add = (suffix: string, type: string, layer: Record<string, unknown>): void => {
+    map.addLayer(layer as unknown as AddLayerArg);
+    layers.push({ id: `${key}:${suffix}`, type });
+  };
+  if (kinds.point) {
+    add('pt', 'circle', {
+      id: `${key}:pt`,
+      type: 'circle',
+      source: sourceId,
+      paint: {
+        'circle-radius': 5,
+        'circle-color': color,
+        'circle-stroke-color': color,
+        'circle-stroke-width': 2,
+      },
+    });
   }
-  return iclient.tiledMapLayer(url);
+  if (kinds.line) {
+    add('ln', 'line', {
+      id: `${key}:ln`,
+      type: 'line',
+      source: sourceId,
+      paint: { 'line-color': color, 'line-width': 2 },
+    });
+  }
+  if (kinds.polygon) {
+    add('pg', 'fill', {
+      id: `${key}:pg`,
+      type: 'fill',
+      source: sourceId,
+      paint: { 'fill-color': color, 'fill-opacity': 0.25, 'fill-outline-color': color },
+    });
+  }
+  return { sourceIds: [sourceId], layers, kind: 'geojson' };
+}
+
+/** 显隐同步（隐藏的层保留在 style 里，layout.visibility 切换）。 */
+function setHandleVisible(map: mapboxgl.Map, handle: LayerHandle, visible: boolean): void {
+  for (const { id } of handle.layers) {
+    try {
+      map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+    } catch {
+      /* 图层尚未落地/已被移除：忽略，下次同步再写 */
+    }
+  }
+}
+
+/** 透明度/着色同步：按图层类型写对应 paint 属性。面填充按 Leaflet 版惯例
+ * 取 opacity 的 1/4，描边/线/点全量。 */
+function applyHandleStyle(
+  map: mapboxgl.Map,
+  handle: LayerHandle,
+  opts: { opacity: number; color?: string },
+): void {
+  for (const { id, type } of handle.layers) {
+    try {
+      if (type === 'raster') {
+        map.setPaintProperty(id, 'raster-opacity', opts.opacity);
+      } else if (type === 'fill') {
+        map.setPaintProperty(id, 'fill-opacity', opts.opacity * 0.25);
+        if (opts.color) {
+          map.setPaintProperty(id, 'fill-color', opts.color);
+          map.setPaintProperty(id, 'fill-outline-color', opts.color);
+        }
+      } else if (type === 'line') {
+        map.setPaintProperty(id, 'line-opacity', opts.opacity);
+        if (opts.color) {
+          map.setPaintProperty(id, 'line-color', opts.color);
+        }
+      } else if (type === 'circle') {
+        map.setPaintProperty(id, 'circle-opacity', opts.opacity);
+        map.setPaintProperty(id, 'circle-stroke-opacity', opts.opacity);
+        if (opts.color) {
+          map.setPaintProperty(id, 'circle-color', opts.color);
+          map.setPaintProperty(id, 'circle-stroke-color', opts.color);
+        }
+      }
+    } catch {
+      /* 图层尚未落地/已被移除：忽略 */
+    }
+  }
+}
+
+/** 摘除句柄的全部 style 资源（先层后源）。 */
+function removeHandle(map: mapboxgl.Map, handle: LayerHandle): void {
+  for (const { id } of handle.layers) {
+    try {
+      map.removeLayer(id);
+    } catch {
+      /* 已被移除：忽略 */
+    }
+  }
+  for (const sid of handle.sourceIds) {
+    try {
+      map.removeSource(sid);
+    } catch {
+      /* 源仍被引用等：忽略 */
+    }
+  }
+}
+
+function mapBbox(map: mapboxgl.Map): [number, number, number, number] {
+  const bounds = map.getBounds();
+  return [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
 }
 
 /** 添加图层弹窗里的服务条目（注册表绑定按绑定 id 聚合出的数据服务）。 */
@@ -272,13 +396,12 @@ function loadLayers(): MapLayer[] {
   ];
 }
 
-function mapBbox(map: L.Map): [number, number, number, number] {
-  const bounds = map.getBounds();
-  return [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
-}
-
 /**
- * 地图浏览器（?panel=map 独立面板，2.16.0）：GIS 风格图层树 + Leaflet 出图。
+ * 地图浏览器（?panel=map 独立面板，2.16.0）：GIS 风格图层树 + Mapbox GL 出图
+ * （2.21.0 引擎自 Leaflet 迁至 mapbox-gl + 官方 SuperMap iClient for MapboxGL
+ * 服务模板）。矢量瓦片/动态矢量瓦片统一走官方 vectorstyles.json 样式（取不到
+ * 回落 zxyTileImage 栅格，两条都是 iclient-mapboxgl 的官方路径，无自写桥接）；
+ * 度坐标系服务由服务端按 prjCoordSys 3857 重投影进 Mercator 网格。
  * - 左侧「图层」树：拖拽把手改叠放次序（数组序 = 绘制序，后者在上），底图
  *   固定最底层不参与排序；点行内嵌展开控制（透明度/着色/缩放到图层/重查/移除）；
  * - 右上角 +：二级菜单「添加图层」（先选注册的服务、再选数据集/地图）与
@@ -306,13 +429,13 @@ export default function MapBrowser() {
 
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const baseLayersRef = useRef<L.TileLayer[]>([]);
-  const instances = useRef<Map<string, L.Layer>>(new Map());
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const baseHandlesRef = useRef<Map<string, LayerHandle>>(new Map());
+  const handlesRef = useRef<Map<string, LayerHandle>>(new Map());
   const inFlight = useRef<Set<string>>(new Set());
   const fitted = useRef<Set<string>>(new Set());
-  /* 瓦片图层异步创建（探测矢量瓦片能力）的去重与落地校验。 */
-  const pendingTiles = useRef<Map<string, Promise<L.TileLayer>>>(new Map());
+  /* 瓦片图层异步创建（vectorstyles 探测）的去重；落地经 mapReady 触发同步。 */
+  const pendingTiles = useRef<Map<string, Promise<LayerHandle>>>(new Map());
   const layersRef = useRef(layers);
   layersRef.current = layers;
   const [mapReady, setMapReady] = useState(0);
@@ -337,297 +460,308 @@ export default function MapBrowser() {
     return config?.map_url ? [{ name: '', url: config.map_url }] : [];
   }, [config]);
 
-  /* 地图初始化：initMap 读服务切图方案（4490 自动注册），失败回退度 CRS。 */
+  /* 底图显隐（2.20.0）：每幅独立（未记录默认可见）；透明度仍整组统一。 */
+  const [baseVisibility, setBaseVisibility] = useState<Record<string, boolean>>({});
+
+  /* 地图初始化（Mapbox GL，Mercator；度坐标系服务由服务端重投影出图）。
+   * 首个服务的 glyphs/sprite 在建图时声明（style 级配置，v1 建后不可改）。 */
   useEffect(() => {
     if (!config?.configured || !containerRef.current || mapRef.current) {
       return;
     }
     let cancelled = false;
     const el = containerRef.current;
-    const inst = instances.current;
+    const inst = handlesRef.current;
+    const baseInst = baseHandlesRef.current;
     const fittedSet = fitted.current;
     const [cx, cy] = config.center.length ? config.center : [0, 0];
     const centerValid = Math.abs(cx) + Math.abs(cy) > 1e-6;
-    const view = centerValid
-      ? { center: [cx, cy] as [number, number], zoom: config.zoom }
-      : { center: [30.6, 104.0] as [number, number], zoom: 7 };
-    const iclient = (L as unknown as IClient).supermap;
-    const degreeCrs = config.epsg === 4326 || config.epsg === 4490 ? L.CRS.EPSG4326 : undefined;
-
-    /* 底图组（2.19.0）：按 basemaps 数组序叠放（前者在下）；env 回落时单幅。 */
-    const basemapUrls = basemapEntries.map((b) => b.url).filter(Boolean);
-
-    /* 底图逐幅异步建层（类型按探测决定）：单幅失败只跳过自身，不塌面板。 */
-    const fallbackInit = async () => {
-      const map = L.map(el, {
-        zoomControl: true,
-        ...view,
-        ...(degreeCrs ? { crs: degreeCrs } : {}),
-      });
-      const layerList: L.TileLayer[] = [];
-      for (const url of basemapUrls) {
-        try {
-          layerList.push(await makeTileLayer(url));
-        } catch (error) {
-          console.warn('[MapBrowser] 底图创建失败:', url, error);
-        }
-      }
-      layerList.forEach((layer) => layer.addTo(map));
-      baseLayersRef.current = layerList;
-      return map;
-    };
+    /* Leaflet 时代 center=[lat,lng]；mapbox 是 [lng,lat]。 */
+    const center: [number, number] = centerValid ? [cy, cx] : [104.0, 30.6];
+    const zoom = centerValid ? (config.zoom ?? 7) : 7;
+    /* 地图异步创建；全屏监听要随 effect cleanup 摘除（async IIFE 的返回值
+     * 无人接收，不能靠它清理）。 */
+    let removeFullscreenHook: (() => void) | null = null;
 
     (async () => {
-      let map: L.Map;
-      try {
-        if (await supportsVectorTiles(basemapUrls[0] ?? '')) {
-          // 首幅是矢量瓦片图层：initMap 只识别栅格切图协议，直接走 fallback
-          throw new Error('vector-basemap');
-        }
-        el.id = 'map'; // initMap 以固定 id 建图（首幅底图走官方切图方案）
-        const created = await iclient.initMap(basemapUrls[0], {
-          mapOptions: { zoomControl: true, ...view },
-        });
-        map = created.map;
-        baseLayersRef.current = [created.layer];
-        for (const url of basemapUrls.slice(1)) {
-          try {
-            const layer = await makeTileLayer(url);
-            layer.addTo(map);
-            baseLayersRef.current.push(layer);
-          } catch (error) {
-            /* 此处再失败不能落回 fallback（地图已建好，容器重初始化会抛错） */
-            console.warn('[MapBrowser] 底图创建失败:', url, error);
-          }
-        }
-      } catch {
-        delete (el as unknown as { _leaflet_id?: number })._leaflet_id;
-        map = await fallbackInit();
-      }
+      const firstUrl = basemapEntries[0]?.url;
+      const firstStyle = firstUrl ? await getVectorStyle(firstUrl) : null;
       if (cancelled) {
-        map.remove();
         return;
       }
-      L.control.scale({ imperial: false }).addTo(map);
+      const style = {
+        version: 8 as const,
+        sources: {},
+        layers: [],
+        ...(firstStyle?.glyphs ? { glyphs: firstStyle.glyphs } : {}),
+        ...(firstStyle?.sprite ? { sprite: firstStyle.sprite } : {}),
+      };
+      const map = new mapboxgl.Map({
+        container: el,
+        style: style as never,
+        center,
+        zoom,
+      });
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
+      map.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+      map.addControl(new Logo(), 'bottom-right');
+      /* 点要素弹窗：矢量数据层前 8 个属性（延续 Leaflet bindPopup 内容）。 */
+      map.on('click', (e) => {
+        const vectorKeys = layersRef.current
+          .filter((l) => l.kind === 'vector' && l.visible)
+          .map((l) => l.key);
+        const ids = vectorKeys.flatMap((k) => inst.get(k)?.layers.map((x) => x.id) ?? []);
+        if (!ids.length) {
+          return;
+        }
+        const feats = map.queryRenderedFeatures(e.point, { layers: ids });
+        if (!feats.length) {
+          return;
+        }
+        const props = (feats[0].properties ?? {}) as Record<string, unknown>;
+        const text = Object.entries(props)
+          .slice(0, 8)
+          .map(([key, value]) => `${key}: ${String(value)}`)
+          .join('<br/>');
+        if (!text) {
+          return;
+        }
+        new mapboxgl.Popup({ closeButton: true, maxWidth: '320px' })
+          .setLngLat(e.lngLat)
+          .setHTML(text)
+          .addTo(map);
+      });
+      /* 全屏切换后容器尺寸变化，引擎需显式重算。 */
+      const onFullscreenChange = () => map.resize();
+      document.addEventListener('fullscreenchange', onFullscreenChange);
+      removeFullscreenHook = () =>
+        document.removeEventListener('fullscreenchange', onFullscreenChange);
       mapRef.current = map;
       setMapReady((n) => n + 1);
     })();
 
     return () => {
       cancelled = true;
+      removeFullscreenHook?.();
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
-      baseLayersRef.current = [];
+      baseInst.clear();
       inst.clear();
       fittedSet.clear();
     };
-  }, [config, basemapEntries]);
+    // basemapEntries 变化即换底图组（与 Leaflet 版语义一致）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config]);
 
   const baseLayer = layers.find((l) => l.kind === 'base');
-  /* 底图分幅显隐（2.20.0）：每幅独立（未记录默认可见）；透明度仍整组统一。 */
-  const [baseVisibility, setBaseVisibility] = useState<Record<string, boolean>>({});
 
+  /* 底图同步：每幅一个句柄（vectorstyles 优先、栅格回落），显隐/透明度跟随。 */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) {
       return;
     }
-    baseLayersRef.current.forEach((base, i) => {
-      const name = basemapEntries[i]?.name ?? '';
-      /* 单幅底图异常只影响自身（矢量瓦片容器异步就绪等），不能崩整个面板 */
-      try {
-        if (baseVisibility[name] ?? true) {
-          if (!map.hasLayer(base)) {
-            base.addTo(map);
-          }
-          try {
-            base.setOpacity(baseLayer?.opacity ?? 1);
-          } catch {
-            /* 容器未就绪时跳过，就绪后下次同步生效 */
-          }
-        } else if (map.hasLayer(base)) {
-          map.removeLayer(base);
+    basemapEntries.forEach((b, i) => {
+      if (!b.url) {
+        return;
+      }
+      const key = `base:${i}`;
+      const visible = baseVisibility[b.name] ?? true;
+      const opacity = baseLayer?.opacity ?? 1;
+      const existing = baseHandlesRef.current.get(key);
+      if (!existing) {
+        let creating = pendingTiles.current.get(key);
+        if (!creating) {
+          creating = (async () => {
+            const style = await getVectorStyle(b.url as string);
+            return style
+              ? addVectorHandle(map, key, style)
+              : addRasterHandle(map, key, b.url as string);
+          })();
+          pendingTiles.current.set(key, creating);
         }
+        creating
+          .then((handle) => {
+            pendingTiles.current.delete(key);
+            if (mapRef.current !== map) {
+              return;
+            }
+            baseHandlesRef.current.set(key, handle);
+            setMapReady((n) => n + 1);
+          })
+          .catch((error) => {
+            pendingTiles.current.delete(key);
+            /* 单幅底图异常只影响自身，不塌面板 */
+            console.warn('[MapBrowser] 底图创建失败:', b.name || i, error);
+          });
+        return;
+      }
+      try {
+        setHandleVisible(map, existing, visible);
+        applyHandleStyle(map, existing, { opacity });
       } catch (error) {
-        console.warn('[MapBrowser] 底图同步失败:', name || i, error);
+        console.warn('[MapBrowser] 底图同步失败:', b.name || i, error);
       }
     });
   }, [basemapEntries, baseVisibility, baseLayer, mapReady]);
 
-  /* 瓦片图层同步：增删/显隐/透明度/叠放次序（数组后者在上）。 */
+  /* 瓦片图层同步：增删/显隐/透明度（vectorstyles 可用即矢量瓦片，否则栅格）。 */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) {
       return;
     }
-    const inst = instances.current;
+    const handles = handlesRef.current;
     const live = new Set(layers.map((l) => l.key));
-    for (const [key, layer] of [...inst.entries()]) {
+    for (const [key, handle] of [...handles.entries()]) {
       if (!live.has(key)) {
-        map.removeLayer(layer);
-        inst.delete(key);
+        removeHandle(map, handle);
+        handles.delete(key);
       }
     }
-    layers.forEach((l, idx) => {
+    layers.forEach((l) => {
       if (l.kind !== 'tiled' || !l.url) {
         return;
       }
-      /* 单个坏图层只影响自身：创建/挂载失败时移除实例记录，下次同步重建
-       * （2.20.0 实测：矢量瓦片图层异常曾致整面板白屏崩溃）。 */
+      const key = l.key;
+      const existing = handles.get(key);
+      if (!existing) {
+        /* 异步创建（探测 vectorstyles）pending 去重；落地前按最新 layers 校验
+         * （创建期间可能已被删/换地图），属性由落地后的下次同步补齐。 */
+        let creating = pendingTiles.current.get(key);
+        if (!creating) {
+          creating = (async () => {
+            const style = await getVectorStyle(l.url as string);
+            return style
+              ? addVectorHandle(map, key, style)
+              : addRasterHandle(map, key, l.url as string);
+          })();
+          pendingTiles.current.set(key, creating);
+        }
+        creating
+          .then((handle) => {
+            pendingTiles.current.delete(key);
+            if (mapRef.current !== map) {
+              return;
+            }
+            if (!layersRef.current.some((x) => x.key === key)) {
+              return;
+            }
+            handles.set(key, handle);
+            setMapReady((n) => n + 1);
+          })
+          .catch((error) => {
+            pendingTiles.current.delete(key);
+            console.warn('[MapBrowser] 图层创建失败:', l.name, error);
+          });
+        return;
+      }
+      /* 单个坏图层只影响自身：同步失败摘除句柄，下次同步重建。 */
       try {
-        const tile = inst.get(l.key) as L.TileLayer | undefined;
-        if (!tile) {
-          /* 图层类型按探测异步决定（矢量瓦片/栅格，2.20.1）：pending 去重；
-           * 落地前按最新 layers 校验（创建期间可能已被删/换地图），属性由
-           * 落地处直接补齐（同步 effect 不会再因创建完成而重跑）。 */
-          const key = l.key;
-          let creating = pendingTiles.current.get(key);
-          if (!creating) {
-            creating = makeTileLayer(l.url);
-            pendingTiles.current.set(key, creating);
-          }
-          creating
-            .then((created) => {
-              pendingTiles.current.delete(key);
-              if (mapRef.current !== map) {
-                return;
-              }
-              const cur = layersRef.current.find((x) => x.key === key);
-              if (!cur) {
-                return;
-              }
-              inst.set(key, created);
-              if (cur.visible && !map.hasLayer(created)) {
-                created.addTo(map);
-              }
-              try {
-                created.setOpacity(cur.opacity);
-                created.setZIndex(layersRef.current.findIndex((x) => x.key === key) + 10);
-              } catch {
-                /* 容器未就绪时跳过，就绪后下次同步生效 */
-              }
-            })
-            .catch((error) => {
-              pendingTiles.current.delete(key);
-              console.warn('[MapBrowser] 图层创建失败:', l.name, error);
-            });
-          return;
-        }
-        if (l.visible) {
-          if (!map.hasLayer(tile)) {
-            tile.addTo(map);
-          }
-          try {
-            tile.setOpacity(l.opacity);
-            tile.setZIndex(idx + 10);
-          } catch {
-            /* 容器未就绪时跳过（矢量瓦片挂载初期），就绪后下次同步生效 */
-          }
-        } else if (map.hasLayer(tile)) {
-          map.removeLayer(tile);
-        }
+        setHandleVisible(map, existing, l.visible);
+        applyHandleStyle(map, existing, { opacity: l.opacity });
       } catch (error) {
         console.warn('[MapBrowser] 图层同步失败:', l.name, error);
-        const bad = inst.get(l.key);
-        if (bad) {
-          try {
-            map.removeLayer(bad);
-          } catch {
-            /* 移除失败同样忽略 */
-          }
-          inst.delete(l.key);
-        }
+        removeHandle(map, existing);
+        handles.delete(key);
       }
     });
   }, [layers, mapReady]);
 
-  /* 矢量图层同步：有要素才建层；风格（着色/透明度）实时跟状态。
+  /* 矢量图层同步：有要素才建层；数据更新走 setData 原地替换（免摘挂）。
    * 首次挂载自动 fitBounds，之后刷新重查保持当前视野（fitted 集合）。 */
+  const prevFeaturesRef = useRef<Record<string, unknown>>({});
   useEffect(() => {
     const map = mapRef.current;
     if (!map) {
       return;
     }
-    const inst = instances.current;
+    const handles = handlesRef.current;
     for (const l of layers) {
       if (l.kind !== 'vector') {
         continue;
       }
       const data = features[l.key];
-      let geo = inst.get(l.key) as L.GeoJSON | undefined;
-      if (data && !geo) {
-        geo = L.geoJSON(data as never, {
-          style: () => ({ color: l.color, weight: 2, fillOpacity: 0.2 }),
-          /* 点要素用圆点（Leaflet 默认 marker 图标在打包环境 404，也更适合叠加） */
-          pointToLayer: (_feature, latlng) => L.circleMarker(latlng, { radius: 5, weight: 2 }),
-          onEachFeature: (feature, featureLayer) => {
-            const props = (feature.properties ?? {}) as Record<string, unknown>;
-            const text = Object.entries(props)
-              .slice(0, 8)
-              .map(([key, value]) => `${key}: ${String(value)}`)
-              .join('<br/>');
-            if (text) {
-              featureLayer.bindPopup(text);
-            }
-          },
-        });
-        inst.set(l.key, geo);
-      }
-      if (!geo) {
+      const handle = handles.get(l.key);
+      if (!handle) {
+        if (!data) {
+          continue;
+        }
+        if (!(data as { features?: unknown[] }).features?.length) {
+          continue;
+        }
+        const created = addGeojsonHandle(map, l.key, data, l.color);
+        handles.set(l.key, created);
+        if (!fitted.current.has(l.key)) {
+          const b = geojsonBounds(data);
+          if (b) {
+            map.fitBounds(
+              [
+                [b[0], b[1]],
+                [b[2], b[3]],
+              ],
+              {
+                padding: 16,
+                maxZoom: 16,
+                duration: 0,
+              },
+            );
+          }
+          fitted.current.add(l.key);
+        }
+        setHandleVisible(map, created, l.visible);
+        applyHandleStyle(map, created, { opacity: l.opacity, color: l.color });
         continue;
       }
-      if (l.visible && data) {
-        if (!map.hasLayer(geo)) {
-          geo.addTo(map);
-          if (!fitted.current.has(l.key)) {
-            const bounds = geo.getBounds();
-            if (bounds.isValid()) {
-              map.fitBounds(bounds, { padding: [16, 16], maxZoom: 16 });
-            }
-            fitted.current.add(l.key);
-          }
+      if (!l.visible || !data) {
+        setHandleVisible(map, handle, false);
+        continue;
+      }
+      setHandleVisible(map, handle, true);
+      applyHandleStyle(map, handle, { opacity: l.opacity, color: l.color });
+      if (data !== prevFeaturesRef.current[l.key]) {
+        const src = map.getSource(handle.sourceIds[0]);
+        if (src && 'setData' in src) {
+          (src as unknown as { setData: (data: unknown) => void }).setData(data);
         }
-        geo.setStyle({ color: l.color, opacity: l.opacity, fillOpacity: l.opacity * 0.25 });
-      } else if (map.hasLayer(geo)) {
-        map.removeLayer(geo);
       }
     }
+    prevFeaturesRef.current = features;
   }, [layers, features, mapReady]);
 
   /* 叠放次序同步（图层树拖拽）：数组序 = 绘制序（数组末 = 树顶 = 地图最上层）。
-   * 矢量层按添加次序绘制（setZIndex 不作用于 SVG），顺序/显隐变化时按数组序
-   * 统一重挂一次；透明度/颜色调整不改 stamp，不触发。 */
+   * mapbox 按 style 声明序绘制：按数组序逐层 moveLayer 压顶即可（含隐藏层，
+   * 不影响；显隐/样式变化不改 stamp 不触发）。 */
   const orderStampRef = useRef('');
   useEffect(() => {
     const map = mapRef.current;
     if (!map) {
       return;
     }
-    const stamp = layers.map((l) => `${l.key}:${l.visible ? 1 : 0}`).join('|');
+    const stamp = layers.map((l) => l.key).join('|');
     if (stamp === orderStampRef.current) {
       return;
     }
     orderStampRef.current = stamp;
-    const inst = instances.current;
     for (const l of layers) {
-      if (l.kind === 'vector') {
-        const geo = inst.get(l.key);
-        if (geo && map.hasLayer(geo)) {
-          map.removeLayer(geo);
+      if (l.kind === 'base') {
+        continue;
+      }
+      const handle = handlesRef.current.get(l.key);
+      if (!handle) {
+        continue;
+      }
+      for (const { id } of handle.layers) {
+        try {
+          map.moveLayer(id);
+        } catch {
+          /* 图层尚未落地：忽略 */
         }
       }
     }
-    for (const l of layers) {
-      if (l.kind === 'vector' && l.visible) {
-        const geo = inst.get(l.key);
-        if (geo && features[l.key] && !map.hasLayer(geo)) {
-          geo.addTo(map);
-        }
-      }
-    }
-  }, [layers, features, mapReady]);
+  }, [layers, mapReady]);
 
   const fetchFeatures = useCallback(
     async (
@@ -641,14 +775,6 @@ export default function MapBrowser() {
       }
       inFlight.current.add(key);
       try {
-        /* 数据更新需重建 GeoJSON 实例（风格回调捕获旧数据无妨，实例整体换新） */
-        /* 数据更新需重建 GeoJSON 实例（风格回调捕获旧数据无妨，实例整体换新）；
-         * 旧实例必须同时从地图摘除，否则重查后新旧两层叠加渲染 */
-        const stale = instances.current.get(key);
-        if (stale && mapRef.current?.hasLayer(stale)) {
-          mapRef.current.removeLayer(stale);
-        }
-        instances.current.delete(key);
         const outcome = await queryTool.mutateAsync({
           params: { layer: regId, max_features: QUERY_MAX_FEATURES, ...(bbox ? { bbox } : {}) },
         });
@@ -792,6 +918,18 @@ export default function MapBrowser() {
     void fetchFeatures(key, regId);
   };
 
+  /** 瓦片图层强制重取（刷新按钮）：摘除句柄与 pending，同步 effect 重建。 */
+  const recreateHandle = (key: string) => {
+    const map = mapRef.current;
+    const handle = handlesRef.current.get(key);
+    if (map && handle) {
+      removeHandle(map, handle);
+      handlesRef.current.delete(key);
+    }
+    pendingTiles.current.delete(key);
+    setMapReady((n) => n + 1);
+  };
+
   /** 刷新（图层树按钮）：矢量层按当前地图范围重查，瓦片层强制重取。 */
   const refreshLayers = () => {
     const map = mapRef.current;
@@ -800,7 +938,7 @@ export default function MapBrowser() {
       if (l.kind === 'vector' && l.regId) {
         void fetchFeatures(l.key, l.regId, false, bbox);
       } else if (l.kind === 'tiled') {
-        (instances.current.get(l.key) as L.TileLayer | undefined)?.redraw();
+        recreateHandle(l.key);
       }
     }
   };
@@ -900,12 +1038,15 @@ export default function MapBrowser() {
     if (!map || l.kind !== 'vector') {
       return;
     }
-    const geo = instances.current.get(l.key) as L.GeoJSON | undefined;
-    if (geo) {
-      const bounds = geo.getBounds();
-      if (bounds.isValid()) {
-        map.fitBounds(bounds, { padding: [16, 16], maxZoom: 16 });
-      }
+    const b = geojsonBounds(features[l.key]);
+    if (b) {
+      map.fitBounds(
+        [
+          [b[0], b[1]],
+          [b[2], b[3]],
+        ],
+        { padding: 16, maxZoom: 16, duration: 0 },
+      );
     }
   };
   /** 按当前地图范围重查该矢量图层。 */

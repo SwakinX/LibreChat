@@ -1,28 +1,79 @@
 import { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import '@supermapgis/iclient-leaflet';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { useLocalize } from '~/hooks';
 import { useMapConfig } from './api';
 
-/* @supermapgis/iclient-leaflet 无 TS 类型：官方 API 最小声明。 */
-type IClient = {
-  supermap: {
-    tiledMapLayer: (url: string) => L.TileLayer;
-    /** 官方 initMap：从 iServer 读切图方案/投影（4490 等自动注册），建图并挂底图。 */
-    initMap: (
-      url: string,
-      options?: { mapOptions?: Record<string, unknown>; layerOptions?: Record<string, unknown> },
-    ) => Promise<{ map: L.Map; layer: L.TileLayer }>;
+/** 结果预览的叠加配色（MapBrowser 数据层默认色系的首色）。 */
+const OVERLAY_COLOR = '#6366f1';
+
+/** 官方栅格 ZXY 模板（iclient-mapboxgl README 同款）：服务端按 prjCoordSys
+ * 3857 把度坐标系底图重投影进 Mercator 网格。{z}/{x}/{y} 记号保持字面量。 */
+function rasterTileTemplate(url: string): string {
+  const base = url.replace(/\/+$/, '');
+  const prj = encodeURIComponent(JSON.stringify({ epsgCode: 3857 }));
+  return `${base}/zxyTileImage.png?prjCoordSys=${prj}&z={z}&x={x}&y={y}&width=256&height=256&transparent=true`;
+}
+
+/** GeoJSON 中出现的几何大类（空/无几何不建对应层）。 */
+function geometryKinds(data: unknown): { point: boolean; line: boolean; polygon: boolean } {
+  const kinds = { point: false, line: false, polygon: false };
+  const fc = data as { features?: { geometry?: { type?: string } | null }[] } | null;
+  for (const f of fc?.features ?? []) {
+    switch (f.geometry?.type) {
+      case 'Point':
+      case 'MultiPoint':
+        kinds.point = true;
+        break;
+      case 'LineString':
+      case 'MultiLineString':
+        kinds.line = true;
+        break;
+      case 'Polygon':
+      case 'MultiPolygon':
+        kinds.polygon = true;
+        break;
+      default:
+        break;
+    }
+  }
+  return kinds;
+}
+
+/** GeoJSON 要素范围（fitBounds 用）。 */
+function geojsonBounds(data: unknown): [number, number, number, number] | null {
+  let w = Infinity;
+  let s = Infinity;
+  let e = -Infinity;
+  let n = -Infinity;
+  const walk = (coords: unknown): void => {
+    if (!Array.isArray(coords) || coords.length === 0) {
+      return;
+    }
+    if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+      const [x, y] = coords as [number, number];
+      w = Math.min(w, x);
+      e = Math.max(e, x);
+      s = Math.min(s, y);
+      n = Math.max(n, y);
+      return;
+    }
+    for (const c of coords) {
+      walk(c);
+    }
   };
-};
+  const fc = data as { features?: { geometry?: { coordinates?: unknown } | null }[] } | null;
+  for (const f of fc?.features ?? []) {
+    walk(f.geometry?.coordinates);
+  }
+  return w <= e && s <= n ? [w, s, e, n] : null;
+}
 
 /**
- * Leaflet 地图面板（2.15.0）：底图走 iClient 官方 initMap（切图方案/坐标
- * 系/瓦片原点全部从 iServer 服务读取，跨域取不到元信息时回退显式度 CRS 的
- * tiledMapLayer）；服务根 URL 由 gateway /map/config 下发，浏览器直连
- * iServer 源地址；可选 GeoJSON 结果叠加（自动 fitBounds + 要素点击弹属性）。
- * 只读。
+ * 地图结果面板（2.15.0；2.21.0 引擎自 Leaflet 迁至 mapbox-gl）：底图走官方
+ * zxyTileImage 栅格模板（服务端重投影 3857），服务根 URL 由 gateway
+ * /map/config 下发，浏览器直连 iServer 源地址；可选 GeoJSON 结果叠加（自动
+ * fitBounds + 点击弹属性）。只读。
  */
 export default function MapPanel({
   className,
@@ -34,8 +85,8 @@ export default function MapPanel({
   const localize = useLocalize();
   const { data: config, isLoading } = useMapConfig();
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const layerRef = useRef<L.GeoJSON | null>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const sourceRef = useRef<string | null>(null);
   const [mapReady, setMapReady] = useState(0);
 
   /* Init once, after the config arrives and the container has its size. */
@@ -43,106 +94,142 @@ export default function MapPanel({
     if (!config?.configured || !containerRef.current || mapRef.current) {
       return;
     }
-    let cancelled = false;
     const el = containerRef.current;
-    /* iServer 端 dom 服务 center=[0,-90]（服务未配中心）——无效中心用默认视野。 */
+    /* iServer 端 dom 服务 center=[0,-90]（服务未配中心）——无效中心用默认视野。
+     * Leaflet 时代 center=[lat,lng]；mapbox 是 [lng,lat]。 */
     const [cx, cy] = config.center.length ? config.center : [0, 0];
     const centerValid = Math.abs(cx) + Math.abs(cy) > 1e-6;
-    const view = centerValid
-      ? { center: [cx, cy] as [number, number], zoom: config.zoom }
-      : // 默认视野：四川全省（2026-09-29 用户指定；initMap 的 mapOptions 覆盖服务值）
-        { center: [30.6, 104.0] as [number, number], zoom: 7 };
-    const iclient = (L as unknown as IClient).supermap;
+    const center: [number, number] = centerValid ? [cy, cx] : [104.0, 30.6];
+    const zoom = centerValid ? (config.zoom ?? 7) : 7;
     /* 底图组（2.19.0）：按序叠放（前者在下）；env 回落时为单幅。 */
     const basemapUrls = (
       config.basemaps?.length ? config.basemaps : [{ name: '', url: config.map_url }]
     )
       .map((b) => b.url)
-      .filter(Boolean);
+      .filter(Boolean) as string[];
 
-    const fallbackInit = () => {
-      /* 服务元信息 XHR 被跨域拦截时的兜底：EPSG:4326/4490 经纬度切图必须用
-       * 度单位 CRS，否则 iClient 换算的 scale 对不上服务切图级别，瓦片空白。 */
-      const degreeCrs = config.epsg === 4326 || config.epsg === 4490 ? L.CRS.EPSG4326 : undefined;
-      const map = L.map(el, {
-        zoomControl: true,
-        ...view,
-        ...(degreeCrs ? { crs: degreeCrs } : {}),
+    const map = new mapboxgl.Map({
+      container: el,
+      style: { version: 8, sources: {}, layers: [] },
+      center,
+      zoom,
+    });
+    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
+    map.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+    basemapUrls.forEach((url, i) => {
+      const sourceId = `base:${i}`;
+      map.addSource(sourceId, {
+        type: 'raster',
+        tiles: [rasterTileTemplate(url)],
+        tileSize: 256,
+        attribution: '© SuperMap iServer',
       });
-      /* 底图组（2.19.0）：按序叠放（前者在下）。 */
-      for (const b of basemapUrls) {
-        iclient.tiledMapLayer(b).addTo(map);
-      }
-      return map;
-    };
-
-    (async () => {
-      let map: L.Map;
-      try {
-        el.id = 'map'; // initMap 以固定 id 建图
-        const created = await iclient.initMap(basemapUrls[0], {
-          mapOptions: { zoomControl: true, ...view },
-        });
-        map = created.map;
-        for (const b of basemapUrls.slice(1)) {
-          iclient.tiledMapLayer(b).addTo(map);
-        }
-      } catch {
-        /* initMap 失败可能已在其固定容器上建了一半图，清掉标记再兜底 */
-        delete (el as unknown as { _leaflet_id?: number })._leaflet_id;
-        map = fallbackInit();
-      }
-      if (cancelled) {
-        map.remove();
+      map.addLayer({ id: sourceId, type: 'raster', source: sourceId });
+    });
+    /* 点要素弹窗：前 8 个属性。 */
+    map.on('click', (e) => {
+      const overlayLayers = map
+        .getStyle()
+        .layers?.filter((l) => l.id.startsWith('overlay:'))
+        .map((l) => l.id);
+      if (!overlayLayers?.length) {
         return;
       }
-      L.control.scale({ imperial: false }).addTo(map);
-      mapRef.current = map;
-      setMapReady((n) => n + 1);
-    })();
+      const feats = map.queryRenderedFeatures(e.point, { layers: overlayLayers });
+      if (!feats.length) {
+        return;
+      }
+      const props = (feats[0].properties ?? {}) as Record<string, unknown>;
+      const text = Object.entries(props)
+        .slice(0, 8)
+        .map(([key, value]) => `${key}: ${String(value)}`)
+        .join('<br/>');
+      if (!text) {
+        return;
+      }
+      new mapboxgl.Popup({ closeButton: true, maxWidth: '320px' })
+        .setLngLat(e.lngLat)
+        .setHTML(text)
+        .addTo(map);
+    });
+    mapRef.current = map;
+    setMapReady((n) => n + 1);
 
     return () => {
-      cancelled = true;
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-      layerRef.current = null;
+      map.remove();
+      mapRef.current = null;
+      sourceRef.current = null;
     };
   }, [config]);
 
-  /* Result overlay: replace on every geojson change, fit to its extent. */
+  /* Result overlay: replace on every geojson change, fit to its extent.
+   * source 常驻 setData 原地更新；图层按几何类型建一次，避免频繁摘挂。 */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) {
       return;
     }
-    if (layerRef.current) {
-      map.removeLayer(layerRef.current);
-      layerRef.current = null;
+    const sourceId = 'overlay:src';
+    if (!sourceRef.current) {
+      if (!geojson) {
+        return;
+      }
+      map.addSource(sourceId, { type: 'geojson', data: geojson as never });
+      const kinds = geometryKinds(geojson);
+      if (kinds.point) {
+        map.addLayer({
+          id: 'overlay:pt',
+          type: 'circle',
+          source: sourceId,
+          paint: {
+            'circle-radius': 5,
+            'circle-color': OVERLAY_COLOR,
+            'circle-stroke-color': OVERLAY_COLOR,
+            'circle-stroke-width': 2,
+          },
+        });
+      }
+      if (kinds.line) {
+        map.addLayer({
+          id: 'overlay:ln',
+          type: 'line',
+          source: sourceId,
+          paint: { 'line-color': OVERLAY_COLOR, 'line-width': 2 },
+        });
+      }
+      if (kinds.polygon) {
+        map.addLayer({
+          id: 'overlay:pg',
+          type: 'fill',
+          source: sourceId,
+          paint: {
+            'fill-color': OVERLAY_COLOR,
+            'fill-opacity': 0.15,
+            'fill-outline-color': OVERLAY_COLOR,
+          },
+        });
+      }
+      sourceRef.current = sourceId;
+    } else {
+      const src = map.getSource(sourceId);
+      if (src && 'setData' in src) {
+        (src as unknown as { setData: (data: unknown) => void }).setData(
+          geojson ?? { type: 'FeatureCollection', features: [] },
+        );
+      }
     }
     if (!geojson) {
       return;
     }
-    const layer = L.geoJSON(geojson as never, {
-      /* 点要素用圆点（Leaflet 默认 marker 图标在打包环境 404） */
-      pointToLayer: (_feature, latlng) => L.circleMarker(latlng, { radius: 5, weight: 2 }),
-      style: { color: '#6366f1', weight: 2, fillOpacity: 0.15 },
-      onEachFeature: (feature, layerInstance) => {
-        const props = (feature.properties ?? {}) as Record<string, unknown>;
-        const text = Object.entries(props)
-          .slice(0, 8)
-          .map(([key, value]) => `${key}: ${String(value)}`)
-          .join('<br/>');
-        if (text) {
-          layerInstance.bindPopup(text);
-        }
-      },
-    }).addTo(map);
-    layerRef.current = layer;
-    const bounds = layer.getBounds();
-    if (bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [16, 16], maxZoom: 16 });
+    const b = geojsonBounds(geojson);
+    if (b) {
+      map.fitBounds(
+        [
+          [b[0], b[1]],
+          [b[2], b[3]],
+        ],
+        { padding: 16, maxZoom: 16, duration: 0 },
+      );
     }
   }, [geojson, mapReady]);
 
