@@ -44,6 +44,7 @@ export default [
   {
     ignores: [
       'client/dist/**/*',
+      'client/src/libs/**/*',
       'client/public/**/*',
       'client/coverage/**/*',
       'e2e/playwright-report/**/*',

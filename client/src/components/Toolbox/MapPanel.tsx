@@ -1,19 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import mapboxgl from 'mapbox-gl';
+/* SuperMap mapbox-gl-enhance（同 MapBrowser）：crs 度网格支持，官方
+ * 01_tiledMapLayer_4490 示例同款。 */
+import mapboxgl from '../../libs/mapbox-gl-enhance';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import '../../libs/mapbox-gl-enhance.css';
 import { useLocalize } from '~/hooks';
 import { useMapConfig } from './api';
 
 /** 结果预览的叠加配色（MapBrowser 数据层默认色系的首色）。 */
 const OVERLAY_COLOR = '#6366f1';
-
-/** 官方栅格 ZXY 模板（iclient-mapboxgl README 同款）：服务端按 prjCoordSys
- * 3857 把度坐标系底图重投影进 Mercator 网格。{z}/{x}/{y} 记号保持字面量。 */
-function rasterTileTemplate(url: string): string {
-  const base = url.replace(/\/+$/, '');
-  const prj = encodeURIComponent(JSON.stringify({ epsgCode: 3857 }));
-  return `${base}/zxyTileImage.png?prjCoordSys=${prj}&z={z}&x={x}&y={y}&width=256&height=256&transparent=true`;
-}
 
 /** GeoJSON 中出现的几何大类（空/无几何不建对应层）。 */
 function geometryKinds(data: unknown): { point: boolean; line: boolean; polygon: boolean } {
@@ -112,25 +107,32 @@ export default function MapPanel({
       .map((b) => b.url)
       .filter(Boolean) as string[];
 
+    /* 度坐标系服务启用增强版 crs（官方 4490 示例同款）。 */
+    const degreeCrs = [4326, 4490, 4214, 4610].includes(config.epsg ?? 0)
+      ? `EPSG:${config.epsg}`
+      : undefined;
     const map = new mapboxgl.Map({
       container: el,
       style: { version: 8, sources: {}, layers: [] },
       center,
       zoom,
-    });
+      ...(degreeCrs ? { crs: degreeCrs } : {}),
+    } as never);
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
     map.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }), 'bottom-left');
     /* addSource/addLayer 必须等 style load（否则 "Style is not done loading"，
-     * 实测）；栅格底图与 mapReady 都挂到 load 事件上。 */
+     * 实测）；栅格底图与 mapReady 都挂到 load 事件上。栅格源走增强引擎
+     * 官方形式（tiles=服务URL + rasterSource:'iserver'，引擎自行出图）。 */
     map.on('load', () => {
       basemapUrls.forEach((url, i) => {
         const sourceId = `base:${i}`;
         map.addSource(sourceId, {
           type: 'raster',
-          tiles: [rasterTileTemplate(url)],
+          tiles: [url],
           tileSize: 256,
+          rasterSource: 'iserver',
           attribution: '© SuperMap iServer',
-        });
+        } as never);
         map.addLayer({ id: sourceId, type: 'raster', source: sourceId });
       });
       setMapReady((n) => n + 1);

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import mapboxgl from 'mapbox-gl';
+/* SuperMap mapbox-gl-enhance：mapbox-gl 1.12.1 定制构建（window.mapboxgl
+ * 官方示例同款，内置 crs 度网格支持——官方 01_tiledMapLayer_4490 示例即此
+ * 用法）。不用 npm mapbox-gl 裸版：它没有 CRS，4490 服务瓦片对不上网格。 */
+import mapboxgl from '../../libs/mapbox-gl-enhance';
+import 'mapbox-gl/dist/mapbox-gl.css';
+import '../../libs/mapbox-gl-enhance.css';
 import { request } from 'librechat-data-provider';
 import {
   Button,
@@ -102,49 +107,6 @@ function sameOriginUrl(url: string): string {
   return url;
 }
 
-/** 带超时的 fetch（样式探测不能拖住建图）。 */
-function fetchWithTimeout(url: string, ms: number): Promise<Response> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), ms);
-  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
-}
-
-/** 栅格 ZXY 模板（官方 iclient-mapboxgl README 同款）：zxyTileImage.png +
- * prjCoordSys 3857——服务端把 4326/4490 底图重投影进 Mercator 瓦片网格，
- * 这是度坐标系服务上 Mercator 引擎的官方出图路径。{z}/{x}/{y} 模板记号
- * 必须保持字面量（mapbox-gl 运行时替换），故手工拼串不走 URLSearchParams。 */
-function rasterTileTemplate(url: string): string {
-  const base = sameOriginUrl(url).replace(/\/+$/, '');
-  const prj = encodeURIComponent(JSON.stringify({ epsgCode: 3857 }));
-  return `${base}/zxyTileImage.png?prjCoordSys=${prj}&z={z}&x={x}&y={y}&width=256&height=256&transparent=true`;
-}
-
-/** 栅格瓦片摘要（sanity 判断用）：z6 起步按模板取单瓦片并哈希；失败返回
- * null（探测不阻塞出图）。 */
-async function rasterTileDigest(
-  url: string,
-  z: number,
-  x: number,
-  y: number,
-): Promise<string | null> {
-  try {
-    const u = rasterTileTemplate(url)
-      .replace('{z}', String(z))
-      .replace('{x}', String(x))
-      .replace('{y}', String(y));
-    const resp = await fetchWithTimeout(u, 15000);
-    if (!resp.ok) {
-      return null;
-    }
-    const digest = await crypto.subtle.digest('SHA-256', await resp.arrayBuffer());
-    return Array.from(new Uint8Array(digest).slice(0, 16))
-      .map((v) => v.toString(16).padStart(2, '0'))
-      .join('');
-  } catch {
-    return null;
-  }
-}
-
 /** 官方矢量瓦片样式：经服务端判断代理获取（/map/vectorstyle）。浏览器不直接
  * 请求 iServer 的 vectorstyles.json——栅格服务上那是一次无法抑制的 404 控制
  * 台报错；服务端探测后浏览器永远拿到 200（样式 JSON 或 capable:false），
@@ -174,14 +136,17 @@ function getVectorStyle(url: string): Promise<StyleJSON | null> {
   return p;
 }
 
-/** 栅格瓦片图层（zxyTileImage 官方模板）。 */
+/** 栅格瓦片图层（增强版引擎官方用法，01_tiledMapLayer_4490 示例同款）：
+ * tiles 直接放 iServer 地图服务 URL + rasterSource:'iserver'——引擎在 crs
+ * 度网格下自行计算切图方案并动态出图（模板/prjCoordSys 补丁全部作废）。 */
 function addRasterHandle(map: mapboxgl.Map, key: string, url: string): LayerHandle {
   const sourceId = `${key}:src`;
   const layerId = `${key}:lyr`;
   map.addSource(sourceId, {
     type: 'raster',
-    tiles: [rasterTileTemplate(url)],
+    tiles: [sameOriginUrl(url)],
     tileSize: 256,
+    rasterSource: 'iserver',
     attribution: '© SuperMap iServer',
   } as unknown as AddSourceArg);
   map.addLayer({ id: layerId, type: 'raster', source: sourceId });
@@ -538,6 +503,11 @@ export default function MapBrowser() {
         ...(glyphsUrl.glyphs ? { glyphs: glyphsUrl.glyphs } : {}),
         ...(glyphsUrl.sprite ? { sprite: glyphsUrl.sprite } : {}),
       };
+      /* 度坐标系服务（4326/4490/4214/4610）启用增强版 crs——引擎按服务切图
+       * 方案在度网格出图（官方 01_tiledMapLayer_4490 示例同款）。 */
+      const degreeCrs = [4326, 4490, 4214, 4610].includes(config.epsg ?? 0)
+        ? `EPSG:${config.epsg}`
+        : undefined;
       const map = new mapboxgl.Map({
         container: el,
         style: style as never,
@@ -545,7 +515,8 @@ export default function MapBrowser() {
         zoom,
         /* 官方可视化示例同款：attributionControl 关闭。 */
         attributionControl: false,
-      });
+        ...(degreeCrs ? { crs: degreeCrs } : {}),
+      } as never);
       map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
       map.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }), 'bottom-left');
       /* 不用 iclient 的 Logo 控件：其类没有 onRemove，mapbox v1 的
@@ -668,50 +639,13 @@ export default function MapBrowser() {
           pendingTiles.current.set(key, creating);
         }
         creating
-          .then(async (handle) => {
+          .then((handle) => {
             pendingTiles.current.delete(key);
             if (mapRef.current !== map) {
               return;
             }
             baseHandlesRef.current.set(key, handle);
             setMapReady((n) => n + 1);
-            if (handle.kind !== 'raster' || !b.url) {
-              return;
-            }
-            /* 栅格 sanity 判断（用户定的原则：是否可用要判断）：取配置中心
-             * 附近两张不同瓦片做摘要，逐字节相同 = 服务端 zxyTileImage 异常
-             * （5.212 dom 实测如此：忽略 x/y 恒回同一图），明示换底图而非
-             * 默默铺坏瓦片。中心保证在服务范围内，避开出界空瓦片误判。 */
-            const [cfgLat, cfgLng] = config?.center?.length ? config.center : [0, 0];
-            const cfgValid = Math.abs(cfgLat) + Math.abs(cfgLng) > 1e-6;
-            const lng = cfgValid ? cfgLng : 104.0;
-            const lat = cfgValid ? cfgLat : 30.6;
-            const z = Math.min(10, Math.max(3, Math.round(config?.zoom ?? 7) + 1));
-            const n = 2 ** z;
-            const tx = Math.floor(((lng + 180) / 360) * n);
-            const latRad = (lat * Math.PI) / 180;
-            const ty = Math.max(
-              0,
-              Math.min(
-                n - 1,
-                Math.floor(
-                  ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n,
-                ),
-              ),
-            );
-            const [d1, d2] = await Promise.all([
-              rasterTileDigest(b.url, z, tx, ty),
-              rasterTileDigest(b.url, z, Math.min(n - 1, tx + 2), ty),
-            ]);
-            if (d1 && d2 && d1 === d2) {
-              /* 服务端忽略 x/y（5.212 老 iServer 无 3857 网格能力，多形式探
-               * 测证实）——铺出来只会是全球同一张图，摘掉并以提示代替。 */
-              removeHandle(map, handle);
-              baseHandlesRef.current.delete(key);
-              setNotice(
-                `底图「${b.name || '底图'}」的栅格服务不支持 MapboxGL 出图（不同瓦片返回相同内容），请在底图管理切换（如北京大屏地图）`,
-              );
-            }
           })
           .catch((error) => {
             pendingTiles.current.delete(key);
@@ -727,7 +661,7 @@ export default function MapBrowser() {
         console.warn('[MapBrowser] 底图同步失败:', b.name || i, error);
       }
     });
-  }, [basemapEntries, baseVisibility, baseLayer, mapReady, config]);
+  }, [basemapEntries, baseVisibility, baseLayer, mapReady]);
 
   /* 瓦片图层同步：增删/显隐/透明度（vectorstyles 可用即矢量瓦片，否则栅格）。 */
   useEffect(() => {
