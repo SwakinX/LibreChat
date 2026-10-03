@@ -1468,6 +1468,7 @@ export default function MapBrowser() {
       {/* ── 符号编辑面板（右键菜单「属性」打开，出现在右侧；点击行不开它） ── */}
       {panelLayer && (
         <PropsPanel
+          innerProps={{ 'data-panelkey': panelLayer.key.slice(-24) }}
           layer={panelLayer}
           featureCount={
             panelLayer.kind === 'vector'
@@ -1502,6 +1503,7 @@ export default function MapBrowser() {
               />
               <div
                 role="menu"
+                data-menukey={menuLayer.key.slice(-24)}
                 aria-label={localize('com_toolbox_map_layer_menu')}
                 className="fixed z-50 w-40 rounded-lg border border-border-medium bg-surface-primary py-1 shadow-lg"
                 style={{ left: ctxMenu.x, top: ctxMenu.y }}
@@ -1651,6 +1653,7 @@ function PropsPanel({
   onRefresh,
   onRemove,
   onClose,
+  innerProps,
 }: {
   layer: MapLayer;
   featureCount: number | null;
@@ -1659,6 +1662,7 @@ function PropsPanel({
   onRefresh?: () => void;
   onRemove?: () => void;
   onClose: () => void;
+  innerProps?: Record<string, string>;
 }) {
   const localize = useLocalize();
   const kindLabels: Record<LayerKind, string> = {
@@ -1668,7 +1672,10 @@ function PropsPanel({
   };
   const kindLabel = kindLabels[layer.kind];
   return (
-    <aside className="flex w-60 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-border-medium p-3 text-sm">
+    <aside
+      className="flex w-60 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-border-medium p-3 text-sm"
+      {...(innerProps ?? {})}
+    >
       <div className="flex items-center gap-1">
         <h3 className="min-w-0 flex-1 truncate font-semibold" title={layer.name}>
           {layer.name || localize('com_toolbox_map_base')}
