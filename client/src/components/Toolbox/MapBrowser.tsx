@@ -780,6 +780,21 @@ export default function MapBrowser() {
     if (!map || !mapReady) {
       return;
     }
+    /* 诊断暴露：矢量层在 effect 视角下的数据状态（features 是否已查到）。 */
+    (window as unknown as { __vecSync?: unknown }).__vecSync = {
+      at: new Date().toISOString(),
+      ready: mapReady,
+      layers: layers
+        .filter((l) => l.kind === 'vector')
+        .map((l) => ({
+          key: l.key.slice(0, 60),
+          visible: l.visible,
+          hasData: !!features[l.key],
+          count:
+            (features[l.key] as { features?: unknown[] } | undefined)?.features?.length ?? null,
+          hasHandle: handlesRef.current.has(l.key),
+        })),
+    };
     const handles = handlesRef.current;
     for (const l of layers) {
       if (l.kind !== 'vector') {
