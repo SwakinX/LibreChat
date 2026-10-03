@@ -1283,15 +1283,6 @@ export default function MapBrowser() {
       });
     }
   };
-  /** 按当前地图范围重查该矢量图层。 */
-  const refreshLayer = (l: MapLayer) => {
-    const map = mapRef.current;
-    if (!l.regId) {
-      return;
-    }
-    void fetchFeatures(l.key, l.regId, false, map ? mapBbox(map) : undefined);
-  };
-
   /** 图层可编辑的符号组：句柄在用句柄实际 paint 层类型；未建层的数据层按
    * 要素几何；栅格/底图无符号组。 */
   const layerPaintKinds = (l: MapLayer): { fill: boolean; line: boolean; circle: boolean } => {
@@ -1524,11 +1515,7 @@ export default function MapBrowser() {
               : null
           }
           paintKinds={layerPaintKinds(panelLayer)}
-          onPatch={patchLayer}
           onSymbol={applyLayerSymbol}
-          onFit={panelLayer.kind !== 'base' ? () => fitLayer(panelLayer) : undefined}
-          onRefresh={panelLayer.regId ? () => refreshLayer(panelLayer) : undefined}
-          onRemove={panelLayer.kind !== 'base' ? () => removeLayer(panelLayer.key) : undefined}
           onClose={() => setPanelKey(null)}
         />
       )}
@@ -1699,11 +1686,7 @@ function PropsPanel({
   layer,
   featureCount,
   paintKinds,
-  onPatch,
   onSymbol,
-  onFit,
-  onRefresh,
-  onRemove,
   onClose,
   innerProps,
 }: {
@@ -1711,12 +1694,8 @@ function PropsPanel({
   featureCount: number | null;
   /** 该图层可编辑的符号组（由句柄/要素几何类型决定）。 */
   paintKinds: { fill: boolean; line: boolean; circle: boolean };
-  onPatch: (key: string, patch: Partial<MapLayer>) => void;
   /** 符号编辑：直写 mapbox paint（实时预览）+ 状态持久化。 */
   onSymbol: (layer: MapLayer, patch: Partial<MapLayer>) => void;
-  onFit?: () => void;
-  onRefresh?: () => void;
-  onRemove?: () => void;
   onClose: () => void;
   innerProps?: Record<string, string>;
 }) {
@@ -1762,20 +1741,6 @@ function PropsPanel({
           </div>
         )}
       </div>
-
-      <label className="flex items-center justify-between gap-2 text-xs">
-        <span>
-          {layer.visible
-            ? localize('com_toolbox_map_layer_hide')
-            : localize('com_toolbox_map_layer_show')}
-        </span>
-        <input
-          type="checkbox"
-          className="accent-[var(--text-primary)]"
-          checked={layer.visible}
-          onChange={() => onPatch(layer.key, { visible: !layer.visible })}
-        />
-      </label>
 
       <div>
         <p className="text-text-quaternary mb-1 text-xs">
@@ -1864,65 +1829,8 @@ function PropsPanel({
       {layer.kind === 'tiled' && !anyVectorPaint && (
         <p className="text-xs text-text-tertiary">{localize('com_toolbox_map_sym_server')}</p>
       )}
-
-      {(onFit || onRefresh || onRemove) && (
-        <div className="flex flex-col gap-1.5">
-          {onFit && (
-            <PanelAction
-              icon={<Crosshair className="size-3.5" aria-hidden="true" />}
-              onClick={onFit}
-            >
-              {localize('com_toolbox_map_fit')}
-            </PanelAction>
-          )}
-          {onRefresh && (
-            <PanelAction
-              icon={<RefreshCw className="size-3.5" aria-hidden="true" />}
-              onClick={onRefresh}
-            >
-              {localize('com_toolbox_map_refresh')}
-            </PanelAction>
-          )}
-          {onRemove && (
-            <PanelAction
-              icon={<Trash2 className="size-3.5" aria-hidden="true" />}
-              danger
-              onClick={onRemove}
-            >
-              {localize('com_toolbox_map_layer_remove')}
-            </PanelAction>
-          )}
-        </div>
-      )}
+      {/* 显隐/缩放/刷新/移除都在图层行与右键菜单，面板只保留符号编辑 */}
     </aside>
-  );
-}
-
-function PanelAction({
-  icon,
-  children,
-  danger,
-  onClick,
-}: {
-  icon: ReactNode;
-  children: ReactNode;
-  danger?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={
-        'flex items-center gap-2 rounded-md border border-border-medium px-2.5 py-1.5 text-xs transition-colors hover:bg-surface-active-alt ' +
-        (danger
-          ? 'hover:text-text-error text-text-secondary'
-          : 'text-text-secondary hover:text-text-primary')
-      }
-      onClick={onClick}
-    >
-      {icon}
-      {children}
-    </button>
   );
 }
 
