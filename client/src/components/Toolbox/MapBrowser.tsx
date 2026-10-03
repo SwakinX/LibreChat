@@ -66,6 +66,10 @@ type MapLayer = {
   visible: boolean;
   opacity: number;
   color: string;
+  /** 线要素线宽（矢量数据层符号编辑，缺省 2）。 */
+  lineWidth?: number;
+  /** 点要素半径（矢量数据层符号编辑，缺省 5）。 */
+  pointRadius?: number;
 };
 
 /** 官方矢量瓦片样式返回结构的最小声明。 */
@@ -322,8 +326,15 @@ function geojsonBounds(data: unknown): [number, number, number, number] | null {
 }
 
 /** GeoJSON 图层：source 常驻（重查 setData 原地更新），按出现的几何类型建
- * circle/line/fill（点=圆点、线=2px、面=25% 填充，延续 Leaflet 版风格）。 */
-function addGeojsonHandle(map: MapboxMap, key: string, data: unknown, color: string): LayerHandle {
+ * circle/line/fill（点=圆点、线=线宽、面=25% 填充；线宽/点大小随状态）。 */
+function addGeojsonHandle(
+  map: MapboxMap,
+  key: string,
+  data: unknown,
+  color: string,
+  lineWidth = 2,
+  pointRadius = 5,
+): LayerHandle {
   const sourceId = `${key}:src`;
   const fc = normalizeFeatureCollection(data);
   map.addSource(sourceId, { type: 'geojson', data: fc } as unknown as AddSourceArg);
@@ -339,7 +350,7 @@ function addGeojsonHandle(map: MapboxMap, key: string, data: unknown, color: str
       type: 'circle',
       source: sourceId,
       paint: {
-        'circle-radius': 5,
+        'circle-radius': pointRadius,
         'circle-color': color,
         'circle-stroke-color': color,
         'circle-stroke-width': 2,
@@ -351,7 +362,7 @@ function addGeojsonHandle(map: MapboxMap, key: string, data: unknown, color: str
       id: `${key}:ln`,
       type: 'line',
       source: sourceId,
-      paint: { 'line-color': color, 'line-width': 2 },
+      paint: { 'line-color': color, 'line-width': lineWidth },
     });
   }
   if (kinds.polygon) {
@@ -376,12 +387,12 @@ function setHandleVisible(map: MapboxMap, handle: LayerHandle, visible: boolean)
   }
 }
 
-/** 透明度/着色同步：按图层类型写对应 paint 属性。面填充按 Leaflet 版惯例
- * 取 opacity 的 1/4，描边/线/点全量。 */
+/** 透明度/着色/线宽/点大小同步：按图层类型写对应 paint 属性。面填充按
+ * Leaflet 版惯例取 opacity 的 1/4，描边/线/点全量。 */
 function applyHandleStyle(
   map: MapboxMap,
   handle: LayerHandle,
-  opts: { opacity: number; color?: string },
+  opts: { opacity: number; color?: string; lineWidth?: number; pointRadius?: number },
 ): void {
   for (const { id, type } of handle.layers) {
     try {
@@ -395,12 +406,18 @@ function applyHandleStyle(
         }
       } else if (type === 'line') {
         map.setPaintProperty(id, 'line-opacity', opts.opacity);
+        if (opts.lineWidth !== undefined) {
+          map.setPaintProperty(id, 'line-width', opts.lineWidth);
+        }
         if (opts.color) {
           map.setPaintProperty(id, 'line-color', opts.color);
         }
       } else if (type === 'circle') {
         map.setPaintProperty(id, 'circle-opacity', opts.opacity);
         map.setPaintProperty(id, 'circle-stroke-opacity', opts.opacity);
+        if (opts.pointRadius !== undefined) {
+          map.setPaintProperty(id, 'circle-radius', opts.pointRadius);
+        }
         if (opts.color) {
           map.setPaintProperty(id, 'circle-color', opts.color);
           map.setPaintProperty(id, 'circle-stroke-color', opts.color);
@@ -881,7 +898,7 @@ export default function MapBrowser() {
         if (!list?.length) {
           continue;
         }
-        const created = addGeojsonHandle(map, l.key, data, l.color);
+        const created = addGeojsonHandle(map, l.key, data, l.color, l.lineWidth, l.pointRadius);
         handles.set(l.key, created);
         if (!fitted.current.has(l.key)) {
           const b = geojsonBounds(data);
@@ -1275,6 +1292,31 @@ export default function MapBrowser() {
     void fetchFeatures(l.key, l.regId, false, map ? mapBbox(map) : undefined);
   };
 
+  /** 图层可编辑的符号组：句柄在用句柄实际 paint 层类型；未建层的数据层按
+   * 要素几何；栅格/底图无符号组。 */
+  const layerPaintKinds = (l: MapLayer): { fill: boolean; line: boolean; circle: boolean } => {
+    const handle = handlesRef.current.get(l.key);
+    if (handle) {
+      const t = new Set(handle.layers.map((x) => x.type));
+      return { fill: t.has('fill'), line: t.has('line'), circle: t.has('circle') };
+    }
+    if (l.kind === 'vector') {
+      const k = geometryKinds(features[l.key]);
+      return { fill: k.polygon, line: k.line, circle: k.point };
+    }
+    return { fill: false, line: false, circle: false };
+  };
+
+  /** 符号编辑：状态持久化 + 直写引擎 paint（实时预览）。 */
+  const applyLayerSymbol = (l: MapLayer, patch: Partial<MapLayer>) => {
+    patchLayer(l.key, patch);
+    const map = mapRef.current;
+    const handle = handlesRef.current.get(l.key);
+    if (map && handle) {
+      applyHandleStyle(map, handle, { ...l, ...patch });
+    }
+  };
+
   /** 图层行类型图标：数据层按要素几何（点/线/面，多型取首见），瓦片与底图
    * 为地图图标。 */
   const layerIcon = (l: MapLayer): ReactNode | undefined => {
@@ -1372,7 +1414,13 @@ export default function MapBrowser() {
               icon={layerIcon(l)}
               selected={selectedKey === l.key}
               dragging={draggingKey === l.key}
-              onSelect={() => setSelectedKey((prev) => (prev === l.key ? null : l.key))}
+              onSelect={() => {
+                /* 符号面板开着时，点击任意行即把面板切到该图层 */
+                if (panelKey) {
+                  setPanelKey(l.key);
+                }
+                setSelectedKey((prev) => (prev === l.key ? null : l.key));
+              }}
               onToggleVisible={() => patchLayer(l.key, { visible: !l.visible })}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -1465,7 +1513,7 @@ export default function MapBrowser() {
         )}
       </main>
 
-      {/* ── 符号编辑面板（右键菜单「属性」打开，出现在右侧；点击行不开它） ── */}
+      {/* ── 符号编辑面板（右键菜单「属性」打开；开着时点击其他行即切换目标） ── */}
       {panelLayer && (
         <PropsPanel
           innerProps={{ 'data-panelkey': panelLayer.key.slice(-24) }}
@@ -1475,7 +1523,9 @@ export default function MapBrowser() {
               ? (featureListOf(features[panelLayer.key])?.length ?? null)
               : null
           }
+          paintKinds={layerPaintKinds(panelLayer)}
           onPatch={patchLayer}
+          onSymbol={applyLayerSymbol}
           onFit={panelLayer.kind !== 'base' ? () => fitLayer(panelLayer) : undefined}
           onRefresh={panelLayer.regId ? () => refreshLayer(panelLayer) : undefined}
           onRemove={panelLayer.kind !== 'base' ? () => removeLayer(panelLayer.key) : undefined}
@@ -1648,7 +1698,9 @@ function LayerTreeRow({
 function PropsPanel({
   layer,
   featureCount,
+  paintKinds,
   onPatch,
+  onSymbol,
   onFit,
   onRefresh,
   onRemove,
@@ -1657,7 +1709,11 @@ function PropsPanel({
 }: {
   layer: MapLayer;
   featureCount: number | null;
+  /** 该图层可编辑的符号组（由句柄/要素几何类型决定）。 */
+  paintKinds: { fill: boolean; line: boolean; circle: boolean };
   onPatch: (key: string, patch: Partial<MapLayer>) => void;
+  /** 符号编辑：直写 mapbox paint（实时预览）+ 状态持久化。 */
+  onSymbol: (layer: MapLayer, patch: Partial<MapLayer>) => void;
   onFit?: () => void;
   onRefresh?: () => void;
   onRemove?: () => void;
@@ -1671,6 +1727,8 @@ function PropsPanel({
     base: localize('com_toolbox_map_base'),
   };
   const kindLabel = kindLabels[layer.kind];
+  const anyVectorPaint = paintKinds.fill || paintKinds.line || paintKinds.circle;
+  const patchSymbol = (patch: Partial<MapLayer>) => onSymbol(layer, patch);
   return (
     <aside
       className="flex w-60 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-border-medium p-3 text-sm"
@@ -1731,21 +1789,80 @@ function PropsPanel({
           aria-label={`${layer.name} opacity`}
           className="h-1 w-full accent-[var(--text-primary)]"
           value={layer.opacity}
-          onChange={(e) => onPatch(layer.key, { opacity: Number(e.target.value) })}
+          onChange={(e) => patchSymbol({ opacity: Number(e.target.value) })}
         />
       </div>
 
-      {layer.kind === 'vector' && (
-        <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="text-text-quaternary">{localize('com_toolbox_map_style')}</span>
-          <input
-            type="color"
-            aria-label={localize('com_toolbox_map_style')}
-            className="size-5 cursor-pointer border-none bg-transparent p-0"
-            value={layer.color}
-            onChange={(e) => onPatch(layer.key, { color: e.target.value })}
-          />
-        </div>
+      {/* 符号编辑（官方 WebSymbol 同类能力）：按图层实际几何分组 */}
+      {anyVectorPaint && (
+        <>
+          <div className="border-t border-border-light pt-2 text-xs font-semibold text-text-secondary">
+            {localize('com_toolbox_map_style')}
+          </div>
+          {paintKinds.fill ? (
+            <div className="flex flex-col gap-1 text-xs">
+              <span className="text-text-quaternary">{localize('com_toolbox_map_sym_fill')}</span>
+              <input
+                type="color"
+                aria-label="fill color"
+                className="h-6 w-full cursor-pointer rounded border-none bg-transparent p-0"
+                value={layer.color}
+                onChange={(e) => patchSymbol({ color: e.target.value })}
+              />
+            </div>
+          ) : null}
+          {paintKinds.line ? (
+            <div className="flex flex-col gap-1 text-xs">
+              <span className="text-text-quaternary">
+                {localize('com_toolbox_map_sym_line', { n: layer.lineWidth ?? 2 })}
+              </span>
+              <input
+                type="color"
+                aria-label="line color"
+                className="h-6 w-full cursor-pointer rounded border-none bg-transparent p-0"
+                value={layer.color}
+                onChange={(e) => patchSymbol({ color: e.target.value })}
+              />
+              <input
+                type="range"
+                min={1}
+                max={10}
+                step={0.5}
+                aria-label="line width"
+                className="h-1 w-full accent-[var(--text-primary)]"
+                value={layer.lineWidth ?? 2}
+                onChange={(e) => patchSymbol({ lineWidth: Number(e.target.value) })}
+              />
+            </div>
+          ) : null}
+          {paintKinds.circle ? (
+            <div className="flex flex-col gap-1 text-xs">
+              <span className="text-text-quaternary">
+                {localize('com_toolbox_map_sym_point', { n: layer.pointRadius ?? 5 })}
+              </span>
+              <input
+                type="color"
+                aria-label="point color"
+                className="h-6 w-full cursor-pointer rounded border-none bg-transparent p-0"
+                value={layer.color}
+                onChange={(e) => patchSymbol({ color: e.target.value })}
+              />
+              <input
+                type="range"
+                min={2}
+                max={16}
+                step={1}
+                aria-label="point radius"
+                className="h-1 w-full accent-[var(--text-primary)]"
+                value={layer.pointRadius ?? 5}
+                onChange={(e) => patchSymbol({ pointRadius: Number(e.target.value) })}
+              />
+            </div>
+          ) : null}
+        </>
+      )}
+      {layer.kind === 'tiled' && !anyVectorPaint && (
+        <p className="text-xs text-text-tertiary">{localize('com_toolbox_map_sym_server')}</p>
       )}
 
       {(onFit || onRefresh || onRemove) && (
