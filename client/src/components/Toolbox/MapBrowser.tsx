@@ -197,11 +197,29 @@ function addVectorHandle(map: MapboxMap, key: string, style: StyleJSON): LayerHa
   return { sourceIds, layers, kind: 'vector' };
 }
 
+/** features 状态兼容：fetchFeatures 存的是要素数组（result.features），兼容
+ * FeatureCollection 形态——统一归一为 FeatureCollection。 */
+function normalizeFeatureCollection(data: unknown): {
+  type: 'FeatureCollection';
+  features: { geometry?: { type?: string; coordinates?: unknown } | null }[];
+} {
+  if (Array.isArray(data)) {
+    return { type: 'FeatureCollection', features: data as never };
+  }
+  const fc = data as {
+    type?: string;
+    features?: { geometry?: { type?: string; coordinates?: unknown } | null }[];
+  };
+  if (fc?.type === 'FeatureCollection' && Array.isArray(fc.features)) {
+    return fc as never;
+  }
+  return { type: 'FeatureCollection', features: [] };
+}
+
 /** GeoJSON 中出现的几何大类（要素几何为 null/缺失时跳过）。 */
 function geometryKinds(data: unknown): { point: boolean; line: boolean; polygon: boolean } {
   const kinds = { point: false, line: false, polygon: false };
-  const fc = data as { features?: { geometry?: { type?: string } | null }[] } | null;
-  for (const f of fc?.features ?? []) {
+  for (const f of normalizeFeatureCollection(data).features) {
     switch (f.geometry?.type) {
       case 'Point':
       case 'MultiPoint':
@@ -244,8 +262,7 @@ function geojsonBounds(data: unknown): [number, number, number, number] | null {
       walk(c);
     }
   };
-  const fc = data as { features?: { geometry?: { coordinates?: unknown } | null }[] } | null;
-  for (const f of fc?.features ?? []) {
+  for (const f of normalizeFeatureCollection(data).features) {
     walk(f.geometry?.coordinates);
   }
   return w <= e && s <= n ? [w, s, e, n] : null;
@@ -255,8 +272,9 @@ function geojsonBounds(data: unknown): [number, number, number, number] | null {
  * circle/line/fill（点=圆点、线=2px、面=25% 填充，延续 Leaflet 版风格）。 */
 function addGeojsonHandle(map: MapboxMap, key: string, data: unknown, color: string): LayerHandle {
   const sourceId = `${key}:src`;
-  map.addSource(sourceId, { type: 'geojson', data } as unknown as AddSourceArg);
-  const kinds = geometryKinds(data);
+  const fc = normalizeFeatureCollection(data);
+  map.addSource(sourceId, { type: 'geojson', data: fc } as unknown as AddSourceArg);
+  const kinds = geometryKinds(fc);
   const layers: { id: string; type: string }[] = [];
   const add = (suffix: string, type: string, layer: Record<string, unknown>): void => {
     map.addLayer(layer as unknown as AddLayerArg);
@@ -847,7 +865,9 @@ export default function MapBrowser() {
       if (data !== prevFeaturesRef.current[l.key]) {
         const src = map.getSource(handle.sourceIds[0]);
         if (src && 'setData' in src) {
-          (src as unknown as { setData: (data: unknown) => void }).setData(data);
+          (src as unknown as { setData: (data: unknown) => void }).setData(
+            normalizeFeatureCollection(data),
+          );
         }
       }
     }
