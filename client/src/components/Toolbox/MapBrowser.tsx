@@ -16,6 +16,7 @@ import {
 } from '@librechat/client';
 import {
   ChevronRight,
+  Circle,
   Crosshair,
   Eye,
   EyeOff,
@@ -23,10 +24,13 @@ import {
   GripVertical,
   Layers,
   Link2,
+  Map as MapIcon,
   Maximize,
   Plus,
   RefreshCw,
   Settings2,
+  Spline,
+  Square,
   Trash2,
 } from 'lucide-react';
 import type {
@@ -214,6 +218,55 @@ function normalizeFeatureCollection(data: unknown): {
     return fc as never;
   }
   return { type: 'FeatureCollection', features: [] };
+}
+
+/** features 状态里某图层的要素列表（数组/FeatureCollection 两形态）。 */
+function featureListOf(data: unknown): unknown[] | null {
+  return normalizeFeatureCollection(data).features;
+}
+
+/** 带超时的 fetch（服务元数据等辅助探测用）。 */
+function fetchWithTimeout(url: string, ms: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
+
+/** 瓦片地图服务范围（右键「缩放到图层」用），按 URL 缓存。 */
+const tiledBoundsCache = new Map<string, Promise<[number, number, number, number] | null>>();
+
+function tiledBounds(url: string): Promise<[number, number, number, number] | null> {
+  let p = tiledBoundsCache.get(url);
+  if (!p) {
+    p = (async () => {
+      try {
+        const resp = await fetchWithTimeout(
+          `${sameOriginUrl(url).replace(/\/+$/, '')}.json`,
+          10000,
+        );
+        if (!resp.ok) {
+          return null;
+        }
+        const meta = (await resp.json()) as {
+          bounds?: { left?: number; bottom?: number; right?: number; top?: number };
+        } | null;
+        const b = meta?.bounds;
+        if (
+          typeof b?.left !== 'number' ||
+          typeof b?.bottom !== 'number' ||
+          typeof b?.right !== 'number' ||
+          typeof b?.top !== 'number'
+        ) {
+          return null;
+        }
+        return [b.left, b.bottom, b.right, b.top];
+      } catch {
+        return null;
+      }
+    })();
+    tiledBoundsCache.set(url, p);
+  }
+  return p;
 }
 
 /** GeoJSON 中出现的几何大类（要素几何为 null/缺失时跳过）。 */
@@ -438,6 +491,8 @@ export default function MapBrowser() {
   const [features, setFeatures] = useState<Record<string, unknown>>({});
   const [notice, setNotice] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  /** 符号编辑面板打开的图层（仅经右键菜单「属性」打开，点击行只做高亮）。 */
+  const [panelKey, setPanelKey] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
@@ -799,13 +854,6 @@ export default function MapBrowser() {
       return;
     }
     /* 诊断暴露：矢量层在 effect 视角下的数据状态（features 是否已查到）。 */
-    const featureListOf = (data: unknown): unknown[] | null => {
-      if (Array.isArray(data)) {
-        return data;
-      }
-      const fc = data as { features?: unknown[] } | undefined;
-      return fc?.features ?? null;
-    };
     (window as unknown as { __vecSync?: unknown }).__vecSync = {
       at: new Date().toISOString(),
       ready: mapReady,
@@ -1013,6 +1061,9 @@ export default function MapBrowser() {
     if (selectedKey === key) {
       setSelectedKey(null);
     }
+    if (panelKey === key) {
+      setPanelKey(null);
+    }
   };
 
   const addTiled = (name: string, serviceUrl: string) => {
@@ -1133,7 +1184,7 @@ export default function MapBrowser() {
 
   /** 图层右键菜单项（可扩展框架：需要新操作就在数组里追加一项）。 */
   const layerContextItems = (l: MapLayer) => [
-    ...(l.kind === 'vector'
+    ...(l.kind !== 'base'
       ? [
           {
             key: 'fit',
@@ -1154,6 +1205,7 @@ export default function MapBrowser() {
       danger: false,
       onClick: () => {
         setSelectedKey(l.key);
+        setPanelKey(l.key);
         setCtxMenu(null);
       },
     },
@@ -1173,23 +1225,45 @@ export default function MapBrowser() {
       : []),
   ];
 
-  const selectedLayer = layers.find((l) => l.key === selectedKey) ?? null;
+  const panelLayer = layers.find((l) => l.key === panelKey) ?? null;
   const overlayLayers = layers.filter((l) => l.kind !== 'base');
-  /** 缩放到图层：矢量按要素范围 fitBounds（行内展开控制）。 */
+  /** 缩放到图层：矢量按要素范围；瓦片地图按服务范围（元数据 bounds，按 URL
+   * 缓存）。 */
   const fitLayer = (l: MapLayer) => {
     const map = mapRef.current;
-    if (!map || l.kind !== 'vector') {
+    if (!map) {
       return;
     }
-    const b = geojsonBounds(features[l.key]);
-    if (b) {
-      map.fitBounds(
-        [
-          [b[0], b[1]],
-          [b[2], b[3]],
-        ],
-        { padding: 16, maxZoom: 16, duration: 0 },
-      );
+    if (l.kind === 'vector') {
+      const b = geojsonBounds(features[l.key]);
+      if (b) {
+        map.fitBounds(
+          [
+            [b[0], b[1]],
+            [b[2], b[3]],
+          ],
+          { padding: 16, maxZoom: 16, duration: 0 },
+        );
+      }
+      return;
+    }
+    if (l.kind === 'tiled' && l.url) {
+      void tiledBounds(l.url).then((b) => {
+        if (!mapRef.current || mapRef.current !== map) {
+          return;
+        }
+        if (b) {
+          map.fitBounds(
+            [
+              [b[0], b[1]],
+              [b[2], b[3]],
+            ],
+            { padding: 16, duration: 0 },
+          );
+        } else {
+          setNotice(`${l.name}: ${localize('com_toolbox_map_detect_fail')}`);
+        }
+      });
     }
   };
   /** 按当前地图范围重查该矢量图层。 */
@@ -1199,6 +1273,28 @@ export default function MapBrowser() {
       return;
     }
     void fetchFeatures(l.key, l.regId, false, map ? mapBbox(map) : undefined);
+  };
+
+  /** 图层行类型图标：数据层按要素几何（点/线/面，多型取首见），瓦片与底图
+   * 为地图图标。 */
+  const layerIcon = (l: MapLayer): ReactNode | undefined => {
+    if (l.kind === 'tiled') {
+      return <MapIcon className="size-3.5" aria-hidden="true" />;
+    }
+    if (l.kind !== 'vector') {
+      return undefined;
+    }
+    const kinds = geometryKinds(features[l.key]);
+    if (kinds.point) {
+      return <Circle className="size-3.5" aria-hidden="true" />;
+    }
+    if (kinds.line) {
+      return <Spline className="size-3.5" aria-hidden="true" />;
+    }
+    if (kinds.polygon) {
+      return <Square className="size-3.5" aria-hidden="true" />;
+    }
+    return <MapIcon className="size-3.5" aria-hidden="true" />;
   };
 
   return (
@@ -1267,11 +1363,13 @@ export default function MapBrowser() {
 
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {notice && <p className="text-text-error px-1 pb-1 text-xs">{notice}</p>}
-          {/* 图层（顶部 = 最上层；拖拽把手改变绘制次序；右键菜单：缩放/属性/移除） */}
+          {/* 图层（顶部 = 最上层；拖拽把手改变绘制次序；右键菜单：缩放/属性/移除；
+              点击行仅高亮不打开面板） */}
           {[...overlayLayers].reverse().map((l) => (
             <LayerTreeRow
               key={l.key}
               layer={l}
+              icon={layerIcon(l)}
               selected={selectedKey === l.key}
               dragging={draggingKey === l.key}
               onSelect={() => setSelectedKey((prev) => (prev === l.key ? null : l.key))}
@@ -1311,6 +1409,7 @@ export default function MapBrowser() {
                       opacity: baseLayer?.opacity ?? 1,
                       color: VECTOR_COLORS[0],
                     }}
+                    icon={<MapIcon className="size-3.5" aria-hidden="true" />}
                     selected={false}
                     dragging={false}
                     onSelect={() => setSelectedKey(null)}
@@ -1366,23 +1465,20 @@ export default function MapBrowser() {
         )}
       </main>
 
-      {/* ── 图层属性面板（选中图层时出现在右侧；右键菜单「属性」即打开它） ── */}
-      {selectedLayer && (
+      {/* ── 符号编辑面板（右键菜单「属性」打开，出现在右侧；点击行不开它） ── */}
+      {panelLayer && (
         <PropsPanel
-          layer={selectedLayer}
+          layer={panelLayer}
           featureCount={
-            selectedLayer.kind === 'vector'
-              ? ((features[selectedLayer.key] as { features?: unknown[] } | undefined)?.features
-                  ?.length ?? null)
+            panelLayer.kind === 'vector'
+              ? (featureListOf(features[panelLayer.key])?.length ?? null)
               : null
           }
           onPatch={patchLayer}
-          onFit={selectedLayer.kind === 'vector' ? () => fitLayer(selectedLayer) : undefined}
-          onRefresh={selectedLayer.regId ? () => refreshLayer(selectedLayer) : undefined}
-          onRemove={
-            selectedLayer.kind !== 'base' ? () => removeLayer(selectedLayer.key) : undefined
-          }
-          onClose={() => setSelectedKey(null)}
+          onFit={panelLayer.kind !== 'base' ? () => fitLayer(panelLayer) : undefined}
+          onRefresh={panelLayer.regId ? () => refreshLayer(panelLayer) : undefined}
+          onRemove={panelLayer.kind !== 'base' ? () => removeLayer(panelLayer.key) : undefined}
+          onClose={() => setPanelKey(null)}
         />
       )}
 
@@ -1457,6 +1553,7 @@ export default function MapBrowser() {
  * 哪行就交换到哪行，抬起结束。 */
 function LayerTreeRow({
   layer,
+  icon,
   selected,
   dragging,
   onSelect,
@@ -1468,6 +1565,8 @@ function LayerTreeRow({
   onDragPointerUp,
 }: {
   layer: MapLayer;
+  /** 图层类型图标：数据层点/线/面，瓦片与底图为地图。 */
+  icon?: ReactNode;
   selected: boolean;
   dragging: boolean;
   onSelect: () => void;
@@ -1528,6 +1627,7 @@ function LayerTreeRow({
             <EyeOff className="text-text-quaternary size-3.5" aria-hidden="true" />
           )}
         </button>
+        {icon && <span className="shrink-0 text-text-tertiary">{icon}</span>}
         <button
           type="button"
           className="min-w-0 flex-1 truncate rounded px-0.5 text-start"
