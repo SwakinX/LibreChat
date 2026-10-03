@@ -781,6 +781,13 @@ export default function MapBrowser() {
       return;
     }
     /* 诊断暴露：矢量层在 effect 视角下的数据状态（features 是否已查到）。 */
+    const featureListOf = (data: unknown): unknown[] | null => {
+      if (Array.isArray(data)) {
+        return data;
+      }
+      const fc = data as { features?: unknown[] } | undefined;
+      return fc?.features ?? null;
+    };
     (window as unknown as { __vecSync?: unknown }).__vecSync = {
       at: new Date().toISOString(),
       ready: mapReady,
@@ -790,8 +797,7 @@ export default function MapBrowser() {
           key: l.key.slice(0, 60),
           visible: l.visible,
           hasData: !!features[l.key],
-          count:
-            (features[l.key] as { features?: unknown[] } | undefined)?.features?.length ?? null,
+          count: featureListOf(features[l.key])?.length ?? null,
           hasHandle: handlesRef.current.has(l.key),
         })),
     };
@@ -803,10 +809,10 @@ export default function MapBrowser() {
       const data = features[l.key];
       const handle = handles.get(l.key);
       if (!handle) {
-        if (!data) {
-          continue;
-        }
-        if (!(data as { features?: unknown[] }).features?.length) {
+        /* features 状态存的是要素数组本身（fetchFeatures 存 result.features），
+         * 兼容 FeatureCollection 形态判断。 */
+        const list = featureListOf(data);
+        if (!list?.length) {
           continue;
         }
         const created = addGeojsonHandle(map, l.key, data, l.color);
