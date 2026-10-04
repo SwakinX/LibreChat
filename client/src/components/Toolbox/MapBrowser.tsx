@@ -556,9 +556,9 @@ export default function MapBrowser() {
   const [baseVisibility, setBaseVisibility] = useState<Record<string, boolean>>({});
 
   /* 地图初始化（Mapbox GL，Mercator；度坐标系服务由服务端重投影出图）。
-   * 首个服务的 glyphs/sprite 在建图时声明（style 级配置，v1 建后不可改）。 */
+   * 底图组为空（未配置底图）也建图——矢量数据层不依赖底图。 */
   useEffect(() => {
-    if (!config?.configured || !containerRef.current || mapRef.current) {
+    if (!config || !containerRef.current || mapRef.current) {
       return;
     }
     let cancelled = false;
@@ -1471,12 +1471,13 @@ export default function MapBrowser() {
             {localize('com_toolbox_map_loading')}
           </p>
         )}
-        {!isLoading && !config?.configured && (
-          <p className="absolute inset-0 flex items-center justify-center rounded-lg border border-border-medium text-sm text-text-tertiary">
+        {/* 未配置仅提示不阻断：底图组为空（无 dom 回退）也要能加矢量数据层 */}
+        {!isLoading && config && !config.configured && (
+          <p className="absolute inset-x-0 top-2 z-[1000] mx-auto w-fit rounded-md border border-border-medium bg-surface-primary/90 px-2 py-1 text-xs text-text-secondary">
             {localize('com_toolbox_map_not_configured')}
           </p>
         )}
-        {config?.configured && (
+        {config && (
           <>
             <div
               ref={containerRef}

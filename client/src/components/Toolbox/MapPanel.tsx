@@ -89,7 +89,7 @@ export default function MapPanel({
   /* Init once, after the config arrives and the container has its size.
    * 引擎经 ensureMapboxGL 异步就绪（运行时 <script>，见 libs/mapboxgl）。 */
   useEffect(() => {
-    if (!config?.configured || !containerRef.current || mapRef.current) {
+    if (!config || !containerRef.current || mapRef.current) {
       return;
     }
     let cancelled = false;
@@ -264,7 +264,7 @@ export default function MapPanel({
       </div>
     );
   }
-  if (!config?.configured) {
+  if (!config) {
     return (
       <div
         className={
