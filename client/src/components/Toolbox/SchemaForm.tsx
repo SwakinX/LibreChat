@@ -47,7 +47,10 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
           (props[name] || hints[name]?.widget === 'upload') && hints[name]?.widget !== 'hidden',
       )
       .map((name) => {
-        const prop = props[name] as Record<string, unknown>;
+        /* upload-only 字段刻意不在 properties 里（见上方过滤注释）——prop 兜底
+         * 空对象，否则 prop.enum 直接 TypeError（ParamBuilder 生成的上传参数
+         * 即此形态，打开工具整页崩，实测）。 */
+        const prop = (props[name] ?? {}) as Record<string, unknown>;
         const enumValues = Array.isArray(prop.enum) ? (prop.enum as string[]) : undefined;
         return {
           name,

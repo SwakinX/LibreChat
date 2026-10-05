@@ -149,4 +149,21 @@ describe('SchemaForm v1 widgets', () => {
     await userEvent.selectOptions(screen.getByLabelText('静态选择'), 'b');
     expect(onChange).toHaveBeenLastCalledWith({ format: 'b' });
   });
+
+  it('renders form-only upload fields (no properties entry) without crashing', () => {
+    /* ParamBuilder 生成的上传参数只写 form.fields 不进 properties（contracts
+     * 2.15.0）——此前 prop.enum 直接 TypeError 整页崩（2026-10-05 实测）。 */
+    const uploadOnly = {
+      ...manifest,
+      parameters: { type: 'object' as const, properties: {} },
+      form: {
+        order: ['attachment'],
+        fields: { attachment: { widget: 'upload' as const, label: '附件' } },
+      },
+    };
+    const onChange = jest.fn();
+    render(<SchemaForm manifest={uploadOnly} values={{}} onChange={onChange} />);
+    expect(screen.getByText('附件')).toBeInTheDocument();
+    expect(screen.getByText('com_toolbox_widget_pick_file')).toBeInTheDocument();
+  });
 });
