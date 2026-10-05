@@ -138,6 +138,22 @@ describe('SchemaForm v1 widgets', () => {
     expect(screen.getAllByText('com_toolbox_choices_failed').length).toBeGreaterThan(0);
   });
 
+  it('degrades choices_from fields to manual inputs when the source errors', async () => {
+    /* 契约（manifest v1 choices_from）：来源工具对当前用户不可见时降级为
+     * 手输——错误文案只作提示线，字段仍可填写提交。 */
+    (useChoicesFrom as jest.Mock).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    });
+    render(<Harness manifest={manifest} />);
+    /* 带静态选项的多选字段优先回退到静态选项组（优雅降级） */
+    expect(screen.getByLabelText('gdb')).toBeInTheDocument();
+    /* 无静态选项的单选字段降级为手输，值可正常提交 */
+    await userEvent.type(screen.getByLabelText('大区'), '北方大区');
+    expect(screen.getByLabelText('大区')).toHaveValue('北方大区');
+  });
+
   it('renders static choices for a plain select without dynamic sources', async () => {
     (useChoicesFrom as jest.Mock).mockReturnValue({
       data: [{ value: 'north', label: '北方大区' }],

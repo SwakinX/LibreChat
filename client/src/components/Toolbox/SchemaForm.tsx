@@ -84,6 +84,7 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
           value={Array.isArray(value) ? (value as unknown[]).map(String) : []}
           disabled={disabled}
           commonCls={commonCls}
+          onSetList={(list) => set(field.name, list)}
           onToggle={(option, checked) => {
             const current = Array.isArray(value) ? (value as unknown[]).map(String) : [];
             set(
@@ -125,6 +126,7 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
           value={String(value ?? '')}
           disabled={disabled}
           commonCls={commonCls}
+          ariaLabel={field.hint.label || field.name}
           onChange={(next) => set(field.name, next)}
         />
       );
@@ -332,6 +334,7 @@ function MultiSelectControl({
   disabled,
   commonCls,
   onToggle,
+  onSetList,
 }: {
   field: FieldDef;
   staticOptions?: string[];
@@ -339,6 +342,8 @@ function MultiSelectControl({
   disabled?: boolean;
   commonCls: string;
   onToggle: (option: string, checked: boolean) => void;
+  /** 降级手输时整组回写（勾选组走 onToggle 逐项切换）。 */
+  onSetList: (list: string[]) => void;
 }) {
   const localize = useLocalize();
   const dynamic = useChoicesFrom(field.hint.choices_from);
@@ -352,9 +357,6 @@ function MultiSelectControl({
       />
     );
   }
-  if (dynamic.isError) {
-    return <p className="text-text-error text-xs">{localize('com_toolbox_choices_failed')}</p>;
-  }
   if (staticOptions?.length) {
     return (
       <OptionCheckGroup
@@ -362,6 +364,28 @@ function MultiSelectControl({
         value={value}
         disabled={disabled}
         onToggle={onToggle}
+      />
+    );
+  }
+  /* 契约降级（manifest v1 choices_from）：来源工具对当前用户不可见/不可达
+   * 时字段降级为手输（逗号分隔）——错误文案只作提示线，不阻断填写。 */
+  if (dynamic.isError) {
+    return (
+      <ManualInput
+        commonCls={commonCls}
+        value={value.join(', ')}
+        placeholder={field.hint.placeholder}
+        disabled={disabled}
+        ariaLabel={field.hint.label || field.name}
+        hint={localize('com_toolbox_choices_failed')}
+        onChange={(next) =>
+          onSetList(
+            next
+              .split(/[,，]/)
+              .map((s) => s.trim())
+              .filter(Boolean),
+          )
+        }
       />
     );
   }
@@ -406,18 +430,32 @@ function ChoicesControl({
   value,
   disabled,
   commonCls,
+  ariaLabel,
   onChange,
 }: {
   hint: FieldHint;
   value: string;
   disabled?: boolean;
   commonCls: string;
+  ariaLabel: string;
   onChange: (next: string) => void;
 }) {
   const localize = useLocalize();
   const dynamic = useChoicesFrom(hint.choices_from);
+  /* 契约降级（manifest v1 choices_from）：来源工具对当前用户不可见/不可达
+   * 时字段降级为手输——错误文案只作提示线，不阻断填写。 */
   if (dynamic.isError) {
-    return <p className="text-text-error text-xs">{localize('com_toolbox_choices_failed')}</p>;
+    return (
+      <ManualInput
+        commonCls={commonCls}
+        value={value}
+        placeholder={hint.placeholder}
+        disabled={disabled}
+        ariaLabel={ariaLabel}
+        hint={localize('com_toolbox_choices_failed')}
+        onChange={onChange}
+      />
+    );
   }
   if (!dynamic.data) {
     return <p className={commonCls}>{localize('com_toolbox_choices_loading')}</p>;
@@ -448,6 +486,42 @@ const COMBO_INPUT =
   'min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-text-primary placeholder-text-tertiary outline-none';
 const COMBO_BUTTON =
   'flex shrink-0 items-center gap-1.5 border-l border-border-medium px-2.5 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-active-alt';
+
+/** choices_from 降级手输（契约：来源工具不可见时降级）：常规输入框 +
+ * 一行提示说明为何手输。fragment 展开——input 直接落在外层 label 下，
+ * 与其他控件同构（隐式 label 关联、flex 纵向间距共用）。 */
+function ManualInput({
+  commonCls,
+  value,
+  placeholder,
+  disabled,
+  hint,
+  ariaLabel,
+  onChange,
+}: {
+  commonCls: string;
+  value: string;
+  placeholder?: string;
+  disabled?: boolean;
+  hint?: string;
+  ariaLabel: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <>
+      <input
+        type="text"
+        className={commonCls}
+        aria-label={ariaLabel}
+        disabled={disabled}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {hint && <span className="text-xs text-text-tertiary">{hint}</span>}
+    </>
+  );
+}
 
 /** date/datetime input with an explicit calendar button: the native picker
  * indicator is easy to miss, so the button calls input.showPicker() (Chromium
