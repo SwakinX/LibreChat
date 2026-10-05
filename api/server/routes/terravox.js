@@ -52,6 +52,53 @@ async function resolveAccessToken(req, res, { forceRefresh = false } = {}) {
   );
 }
 
+/** Gateway unreachable → uniform 502 (shared by every forwarding route). */
+function respondGatewayDown(res, error, logLabel) {
+  logger.error(logLabel, error?.name, error?.message, error?.cause?.code ?? '');
+  const message =
+    error.name === 'AbortError' ? 'Tool Gateway timed out' : 'Tool Gateway unreachable';
+  return res.status(502).json({ message: `${message} (${GATEWAY_URL})` });
+}
+
+/** Streaming file proxy shared by /files/download and /files/temp/:token:
+ * bytes pass through verbatim (buffering would corrupt binaries), error
+ * payloads forward as-is, downstream failure → uniform 502. */
+async function streamFileProxy(req, res, gatewayPath, logLabel) {
+  const accessToken = await resolveAccessToken(req, res);
+  if (!accessToken) {
+    return res
+      .status(503)
+      .json({ message: 'Tool Gateway requires an OpenID session token. Log out and back in.' });
+  }
+  try {
+    const upstream = await fetch(`${GATEWAY_URL}${gatewayPath}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!upstream.ok || !upstream.body) {
+      const payload = await upstream.text();
+      return res
+        .status(upstream.status)
+        .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
+        .send(payload);
+    }
+    res.status(upstream.status);
+    const disposition = upstream.headers.get('content-disposition');
+    if (disposition) {
+      res.set('Content-Disposition', disposition);
+    }
+    res.set('Content-Type', upstream.headers.get('content-type') || 'application/octet-stream');
+    const reader = upstream.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    return res.end();
+  } catch (error) {
+    return respondGatewayDown(res, error, logLabel);
+  }
+}
+
 async function forwardToGateway(
   req,
   res,
@@ -110,9 +157,7 @@ async function forwardToGateway(
       .set('Content-Type', response.headers.get('content-type') || 'application/json')
       .send(payload);
   } catch (error) {
-    const message =
-      error.name === 'AbortError' ? 'Tool Gateway timed out' : 'Tool Gateway unreachable';
-    return res.status(502).json({ message: `${message} (${GATEWAY_URL})` });
+    return respondGatewayDown(res, error, '[terravox] forward failed:');
   } finally {
     clearTimeout(timer);
   }
@@ -217,50 +262,14 @@ router.post('/tools/:toolId/execute-upload', async (req, res) => {
 
 /* File download proxy (2.15.0): stream bytes verbatim — buffering here
  * would corrupt binary payloads, so this route never uses forwardToGateway. */
-router.get('/files/download', async (req, res) => {
-  const accessToken = await resolveAccessToken(req, res);
-  if (!accessToken) {
-    return res
-      .status(503)
-      .json({ message: 'Tool Gateway requires an OpenID session token. Log out and back in.' });
-  }
-  try {
-    const upstream = await fetch(
-      `${GATEWAY_URL}/api/v1/nextcloud/files/download?path=${encodeURIComponent(String(req.query.path || ''))}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
-    );
-    if (!upstream.ok || !upstream.body) {
-      const payload = await upstream.text();
-      return res
-        .status(upstream.status)
-        .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
-        .send(payload);
-    }
-    res.status(upstream.status);
-    const disposition = upstream.headers.get('content-disposition');
-    if (disposition) {
-      res.set('Content-Disposition', disposition);
-    }
-    res.set('Content-Type', upstream.headers.get('content-type') || 'application/octet-stream');
-    const reader = upstream.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(Buffer.from(value));
-    }
-    return res.end();
-  } catch (error) {
-    logger.error(
-      '[terravox] execute-upload/file-download forward failed:',
-      error?.name,
-      error?.message,
-      error?.cause?.code ?? '',
-    );
-    const message =
-      error.name === 'AbortError' ? 'Tool Gateway timed out' : 'Tool Gateway unreachable';
-    return res.status(502).json({ message: `${message} (${GATEWAY_URL})` });
-  }
-});
+router.get('/files/download', (req, res) =>
+  streamFileProxy(
+    req,
+    res,
+    `/api/v1/nextcloud/files/download?path=${encodeURIComponent(String(req.query.path || ''))}`,
+    '[terravox] file-download forward failed:',
+  ),
+);
 
 /* Map panel config (2.15.0): base tile template served same-origin via the
  * nginx /iserver/ reverse proxy; nothing sensitive reaches the browser. */
@@ -278,7 +287,13 @@ router.get(
  * may present self-signed TLS (5.28:8443). Path allowlist keeps this from
  * becoming a generic proxy. */
 const ISERVER_AGENT = new http.Agent({ keepAlive: true });
-const ISERVER_TLS_AGENT = new https.Agent({ rejectUnauthorized: false, keepAlive: true });
+/* iServer https 实例常为自签名（5.28:8443）：默认放宽校验；ISERVER_TLS_VERIFY=true
+ * 时启用严格校验（与 gateway 的 iserver_tls_verify 对齐，2026-10-05 审查项）。 */
+const ISERVER_TLS_VERIFY = String(process.env.ISERVER_TLS_VERIFY || '') === 'true';
+const ISERVER_TLS_AGENT = new https.Agent({
+  rejectUnauthorized: !ISERVER_TLS_VERIFY,
+  keepAlive: true,
+});
 const vectorStyleCache = new Map();
 
 function fetchIserverBuffer(url, timeoutMs = 15000) {
@@ -378,45 +393,14 @@ router.get(
 
 /* Temp artifact download (2.16.0): stream bytes verbatim from the gateway's
  * in-memory run store — same shape as /files/download, never buffered. */
-router.get('/files/temp/:token', async (req, res) => {
-  const accessToken = await resolveAccessToken(req, res);
-  if (!accessToken) {
-    return res
-      .status(503)
-      .json({ message: 'Tool Gateway requires an OpenID session token. Log out and back in.' });
-  }
-  try {
-    const upstream = await fetch(
-      `${GATEWAY_URL}/api/v1/files/temp/${encodeURIComponent(req.params.token)}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
-    );
-    if (!upstream.ok || !upstream.body) {
-      const payload = await upstream.text();
-      return res
-        .status(upstream.status)
-        .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
-        .send(payload);
-    }
-    res.status(upstream.status);
-    const disposition = upstream.headers.get('content-disposition');
-    if (disposition) {
-      res.set('Content-Disposition', disposition);
-    }
-    res.set('Content-Type', upstream.headers.get('content-type') || 'application/octet-stream');
-    const reader = upstream.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(Buffer.from(value));
-    }
-    return res.end();
-  } catch (error) {
-    logger.error('[terravox] temp file forward failed:', error?.name, error?.message);
-    const message =
-      error.name === 'AbortError' ? 'Tool Gateway timed out' : 'Tool Gateway unreachable';
-    return res.status(502).json({ message: `${message} (${GATEWAY_URL})` });
-  }
-});
+router.get('/files/temp/:token', (req, res) =>
+  streamFileProxy(
+    req,
+    res,
+    `/api/v1/files/temp/${encodeURIComponent(req.params.token)}`,
+    '[terravox] temp file forward failed:',
+  ),
+);
 
 /* One-click save of textual tool results into the user's drive (2.16.0). */
 router.post(
