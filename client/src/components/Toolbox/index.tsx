@@ -293,14 +293,14 @@ function ToolRunner({ manifest }: { manifest: ToolManifest }) {
 /** Server-tool twin of LocalRunner's run-history section: rows come from the
  * gateway's usage records (own rows only); the params/result join comes from
  * this browser's cache (the gateway stores key names only). Restore feeds the
- * cached params back into the form. */
+ * cached params back into the form. Web/plugin tools pass no onRestoreRun. */
 export function MyRunRecords({
   toolId,
   onRestoreRun,
   renderResult,
 }: {
   toolId: string;
-  onRestoreRun: (params: Record<string, unknown>) => void;
+  onRestoreRun?: (params: Record<string, unknown>) => void;
   renderResult?: (result: unknown) => ReactNode;
 }) {
   const localize = useLocalize();
@@ -315,7 +315,7 @@ export function MyRunRecords({
       duration_ms: run.duration_ms ?? null,
       params: cached?.params ?? null,
       result: cached?.result,
-      onRestore: cached ? onRestoreRun : undefined,
+      onRestore: cached && onRestoreRun ? onRestoreRun : undefined,
     };
   });
   return <RunRecordsSection rows={rows} localize={localize} renderResult={renderResult} />;

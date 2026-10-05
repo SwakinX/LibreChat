@@ -55,7 +55,7 @@ export default function WebRunner({ manifest }: { manifest: ToolManifest }) {
       </section>
 
       {/* Web tools take no params — there is nothing to restore. */}
-      <MyRunRecords toolId={manifest.tool_id} onRestoreRun={() => undefined} />
+      <MyRunRecords toolId={manifest.tool_id} />
     </div>
   );
 }

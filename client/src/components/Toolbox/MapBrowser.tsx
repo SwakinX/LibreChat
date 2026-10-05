@@ -38,7 +38,6 @@ import type {
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from 'react';
-import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   useChoicesFrom,
   useExecuteTool,
@@ -51,6 +50,13 @@ import {
   type ServiceBinding,
 } from './api';
 import { useLocalize } from '~/hooks';
+import CheckIndicator from './CheckIndicator';
+import {
+  featureListOf,
+  geojsonBounds,
+  geometryKinds,
+  normalizeFeatureCollection,
+} from './mapGeometry';
 
 type LayerKind = 'base' | 'tiled' | 'vector';
 
@@ -205,30 +211,6 @@ function addVectorHandle(map: MapboxMap, key: string, style: StyleJSON): LayerHa
   return { sourceIds, layers, kind: 'vector' };
 }
 
-/** features 状态兼容：fetchFeatures 存的是要素数组（result.features），兼容
- * FeatureCollection 形态——统一归一为 FeatureCollection。 */
-function normalizeFeatureCollection(data: unknown): {
-  type: 'FeatureCollection';
-  features: { geometry?: { type?: string; coordinates?: unknown } | null }[];
-} {
-  if (Array.isArray(data)) {
-    return { type: 'FeatureCollection', features: data as never };
-  }
-  const fc = data as {
-    type?: string;
-    features?: { geometry?: { type?: string; coordinates?: unknown } | null }[];
-  };
-  if (fc?.type === 'FeatureCollection' && Array.isArray(fc.features)) {
-    return fc as never;
-  }
-  return { type: 'FeatureCollection', features: [] };
-}
-
-/** features 状态里某图层的要素列表（数组/FeatureCollection 两形态）。 */
-function featureListOf(data: unknown): unknown[] | null {
-  return normalizeFeatureCollection(data).features;
-}
-
 /** 带超时的 fetch（服务元数据等辅助探测用）。 */
 function fetchWithTimeout(url: string, ms: number): Promise<Response> {
   const ctrl = new AbortController();
@@ -271,58 +253,6 @@ function tiledBounds(url: string): Promise<[number, number, number, number] | nu
     tiledBoundsCache.set(url, p);
   }
   return p;
-}
-
-/** GeoJSON 中出现的几何大类（要素几何为 null/缺失时跳过）。 */
-function geometryKinds(data: unknown): { point: boolean; line: boolean; polygon: boolean } {
-  const kinds = { point: false, line: false, polygon: false };
-  for (const f of normalizeFeatureCollection(data).features) {
-    switch (f.geometry?.type) {
-      case 'Point':
-      case 'MultiPoint':
-        kinds.point = true;
-        break;
-      case 'LineString':
-      case 'MultiLineString':
-        kinds.line = true;
-        break;
-      case 'Polygon':
-      case 'MultiPolygon':
-        kinds.polygon = true;
-        break;
-      default:
-        break;
-    }
-  }
-  return kinds;
-}
-
-/** GeoJSON 要素范围（fitBounds 用；替代 Leaflet 的 geo.getBounds）。 */
-function geojsonBounds(data: unknown): [number, number, number, number] | null {
-  let w = Infinity;
-  let s = Infinity;
-  let e = -Infinity;
-  let n = -Infinity;
-  const walk = (coords: unknown): void => {
-    if (!Array.isArray(coords) || coords.length === 0) {
-      return;
-    }
-    if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
-      const [x, y] = coords as [number, number];
-      w = Math.min(w, x);
-      e = Math.max(e, x);
-      s = Math.min(s, y);
-      n = Math.max(n, y);
-      return;
-    }
-    for (const c of coords) {
-      walk(c);
-    }
-  };
-  for (const f of normalizeFeatureCollection(data).features) {
-    walk(f.geometry?.coordinates);
-  }
-  return w <= e && s <= n ? [w, s, e, n] : null;
 }
 
 /** GeoJSON 图层：source 常驻（重查 setData 原地更新），按出现的几何类型建
@@ -649,9 +579,8 @@ export default function MapBrowser() {
       ro.observe(el);
       removeFullscreenHook = () => ro.disconnect();
       mapRef.current = map;
-      /* 调试钩子：控制台可直接查 getStyle()/queryRenderedFeatures；同时把
-       * 引擎 error 事件显式落日志（此前无监听，worker/瓦片错误不可见）。 */
-      (window as unknown as { __map?: MapboxMap }).__map = map;
+      /* 引擎 error 事件显式落日志：此前无监听，worker/瓦片错误不可见（控制
+       * 台只报 "Map data not available" 一类泛化文案）。 */
       map.on('error', (e) => {
         console.error('[MapBrowser] map error:', (e as { error?: Error }).error?.message || e);
       });
@@ -870,20 +799,6 @@ export default function MapBrowser() {
     if (!map || !mapReady) {
       return;
     }
-    /* 诊断暴露：矢量层在 effect 视角下的数据状态（features 是否已查到）。 */
-    (window as unknown as { __vecSync?: unknown }).__vecSync = {
-      at: new Date().toISOString(),
-      ready: mapReady,
-      layers: layers
-        .filter((l) => l.kind === 'vector')
-        .map((l) => ({
-          key: l.key.slice(0, 60),
-          visible: l.visible,
-          hasData: !!features[l.key],
-          count: featureListOf(features[l.key])?.length ?? null,
-          hasHandle: handlesRef.current.has(l.key),
-        })),
-    };
     const handles = handlesRef.current;
     for (const l of layers) {
       if (l.kind !== 'vector') {
@@ -1579,7 +1494,6 @@ export default function MapBrowser() {
       <ResolveDialog
         open={resolveOpen}
         resolve={resolve}
-        localize={localize}
         onAddMap={addTiled}
         onAddVector={addVector}
         onClose={() => setResolveOpen(false)}
@@ -1876,8 +1790,6 @@ function AddLayerDialog({
   const match = (text: string, q: string) => text.toLowerCase().includes(q.trim().toLowerCase());
   const rowCls =
     'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-surface-active-alt';
-  const check =
-    'flex size-4 shrink-0 items-center justify-center rounded border border-border-medium';
 
   const toggle = (list: string[], key: string) =>
     list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
@@ -2026,12 +1938,7 @@ function AddLayerDialog({
                           className={rowCls}
                           onClick={() => setPickedMaps((prev) => toggle(prev, m.name))}
                         >
-                          <span
-                            className={check + (picked ? ' border-indigo-500 bg-indigo-500' : '')}
-                            aria-hidden="true"
-                          >
-                            {picked && <span className="size-2 rounded-sm bg-white" />}
-                          </span>
+                          <CheckIndicator on={picked} />
                           <span className="min-w-0 flex-1 truncate" title={m.name}>
                             {m.name}
                           </span>
@@ -2064,12 +1971,7 @@ function AddLayerDialog({
                           className={rowCls}
                           onClick={() => setPickedVectors((prev) => toggle(prev, dataset.regId))}
                         >
-                          <span
-                            className={check + (picked ? ' border-indigo-500 bg-indigo-500' : '')}
-                            aria-hidden="true"
-                          >
-                            {picked && <span className="size-2 rounded-sm bg-white" />}
-                          </span>
+                          <CheckIndicator on={picked} />
                           <span className="min-w-0 flex-1 truncate" title={dataset.name}>
                             {dataset.name}
                           </span>
@@ -2105,18 +2007,17 @@ function AddLayerDialog({
 function ResolveDialog({
   open,
   resolve,
-  localize,
   onAddMap,
   onAddVector,
   onClose,
 }: {
   open: boolean;
   resolve: ReturnType<typeof useResolveService>;
-  localize: ReturnType<typeof useLocalize>;
   onAddMap: (name: string, serviceUrl: string) => void;
   onAddVector: (name: string, regId: string) => void;
   onClose: () => void;
 }) {
+  const localize = useLocalize();
   const [url, setUrl] = useState('');
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
   const [error, setError] = useState('');
@@ -2230,8 +2131,6 @@ function ResolveCard({
 
   const rowCls =
     'flex w-full items-center gap-2 rounded px-1.5 py-1 text-start text-xs transition-colors hover:bg-surface-active-alt';
-  const check =
-    'flex size-3.5 shrink-0 items-center justify-center rounded border border-border-medium';
   const toggle = (k: string) =>
     setPicked((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
   const importPicked = () => {
@@ -2270,12 +2169,7 @@ function ResolveCard({
                 className={rowCls}
                 onClick={() => toggle(m.name)}
               >
-                <span
-                  className={check + (pickedOn ? ' border-indigo-500 bg-indigo-500' : '')}
-                  aria-hidden="true"
-                >
-                  {pickedOn && <span className="size-2 rounded-sm bg-white" />}
-                </span>
+                <CheckIndicator on={pickedOn} className="size-3.5" />
                 <span className="min-w-0 flex-1 truncate" title={m.name}>
                   {m.name}
                 </span>
@@ -2293,12 +2187,7 @@ function ResolveCard({
                 className={rowCls}
                 onClick={() => toggle(v.key)}
               >
-                <span
-                  className={check + (pickedOn ? ' border-indigo-500 bg-indigo-500' : '')}
-                  aria-hidden="true"
-                >
-                  {pickedOn && <span className="size-2 rounded-sm bg-white" />}
-                </span>
+                <CheckIndicator on={pickedOn} className="size-3.5" />
                 <span className="text-text-quaternary w-24 shrink-0 truncate" title={v.ds}>
                   {v.ds}
                 </span>

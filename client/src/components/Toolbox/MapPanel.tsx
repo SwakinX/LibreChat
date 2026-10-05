@@ -6,65 +6,12 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import '../../libs/mapbox-gl-enhance.css';
 import { useLocalize } from '~/hooks';
 import { useMapConfig } from './api';
+import { geojsonBounds, geometryKinds } from './mapGeometry';
 
 /** 结果预览的叠加配色（MapBrowser 数据层默认色系的首色）。 */
 const OVERLAY_COLOR = '#6366f1';
 
 type MapboxMap = import('mapbox-gl').Map;
-
-/** GeoJSON 中出现的几何大类（空/无几何不建对应层）。 */
-function geometryKinds(data: unknown): { point: boolean; line: boolean; polygon: boolean } {
-  const kinds = { point: false, line: false, polygon: false };
-  const fc = data as { features?: { geometry?: { type?: string } | null }[] } | null;
-  for (const f of fc?.features ?? []) {
-    switch (f.geometry?.type) {
-      case 'Point':
-      case 'MultiPoint':
-        kinds.point = true;
-        break;
-      case 'LineString':
-      case 'MultiLineString':
-        kinds.line = true;
-        break;
-      case 'Polygon':
-      case 'MultiPolygon':
-        kinds.polygon = true;
-        break;
-      default:
-        break;
-    }
-  }
-  return kinds;
-}
-
-/** GeoJSON 要素范围（fitBounds 用）。 */
-function geojsonBounds(data: unknown): [number, number, number, number] | null {
-  let w = Infinity;
-  let s = Infinity;
-  let e = -Infinity;
-  let n = -Infinity;
-  const walk = (coords: unknown): void => {
-    if (!Array.isArray(coords) || coords.length === 0) {
-      return;
-    }
-    if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
-      const [x, y] = coords as [number, number];
-      w = Math.min(w, x);
-      e = Math.max(e, x);
-      s = Math.min(s, y);
-      n = Math.max(n, y);
-      return;
-    }
-    for (const c of coords) {
-      walk(c);
-    }
-  };
-  const fc = data as { features?: { geometry?: { coordinates?: unknown } | null }[] } | null;
-  for (const f of fc?.features ?? []) {
-    walk(f.geometry?.coordinates);
-  }
-  return w <= e && s <= n ? [w, s, e, n] : null;
-}
 
 /**
  * 地图结果面板（2.15.0；2.21.0 引擎自 Leaflet 迁至 mapbox-gl）：底图走官方

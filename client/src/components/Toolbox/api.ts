@@ -376,10 +376,6 @@ export function mimeFromName(name: string): string {
   return table[ext] ?? 'application/octet-stream';
 }
 
-/** One-click save of textual tool output into the user's drive (2.16.0). */
-export const saveCloudText = (filename: string, content: string) =>
-  post<{ path: string }>('/api/terravox/nextcloud/save-text', { filename, content });
-
 /** Save a temp artifact (/files/temp/{token}) into a user-chosen drive folder
  * (2.16.0 result page: directory picker → gateway moves the bytes). */
 export const saveTempToDrive = (token: string, dir: string, filename?: string) =>

@@ -8,6 +8,7 @@ import {
   OGDialogHeader,
   OGDialogTitle,
 } from '@librechat/client';
+import CheckIndicator from './CheckIndicator';
 import { useCloudBrowse } from './api';
 import { useLocalize } from '~/hooks';
 
@@ -140,15 +141,7 @@ export default function CloudPickerDialog({
                     multi ? toggle(entry.name) : pick([{ path: rel(entry.name), name: entry.name }])
                   }
                 >
-                  <span
-                    className={
-                      'flex size-4 shrink-0 items-center justify-center rounded border ' +
-                      (picked ? 'border-indigo-500 bg-indigo-500' : 'border-border-medium')
-                    }
-                    aria-hidden="true"
-                  >
-                    {picked && <span className="size-2 rounded-sm bg-white" aria-hidden="true" />}
-                  </span>
+                  <CheckIndicator on={picked} />
                   <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                   <span className="text-text-quaternary shrink-0 text-xs">
                     {Math.ceil(entry.size / 1024)} KB

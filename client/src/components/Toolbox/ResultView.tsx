@@ -9,23 +9,26 @@ import MapPanel from './MapPanel';
 
 type ResultViewProps = { outcome: ExecuteResult; manifest: ToolManifest };
 
+/** Table 渲染的行数据：数组直接用，{entries[]} 包裹形态解包，其余为空。 */
+function resultRows(result: unknown): Record<string, unknown>[] {
+  if (Array.isArray(result)) {
+    return result as Record<string, unknown>[];
+  }
+  if (
+    result &&
+    typeof result === 'object' &&
+    Array.isArray((result as { entries?: unknown }).entries)
+  ) {
+    return (result as { entries: Record<string, unknown>[] }).entries;
+  }
+  return [];
+}
+
 /** Render an execution result by its manifest renderer (table/text/markdown/json for v1). */
 export default function ResultView({ outcome, manifest }: ResultViewProps) {
   const { renderer, result } = outcome;
 
-  const rows = useMemo<Record<string, unknown>[]>(() => {
-    if (Array.isArray(result)) {
-      return result as Record<string, unknown>[];
-    }
-    if (
-      result &&
-      typeof result === 'object' &&
-      Array.isArray((result as { entries?: unknown }).entries)
-    ) {
-      return (result as { entries: Record<string, unknown>[] }).entries;
-    }
-    return [];
-  }, [result]);
+  const rows = useMemo(() => resultRows(result), [result]);
 
   /* 文本类结果直接下载（2.16.0 改版：不再默认写云盘） */
   const saveText = useMemo(
@@ -46,19 +49,7 @@ function ResultBody({ outcome, manifest }: ResultViewProps) {
   const localize = useLocalize();
   const { renderer, result } = outcome;
 
-  const rows = useMemo<Record<string, unknown>[]>(() => {
-    if (Array.isArray(result)) {
-      return result as Record<string, unknown>[];
-    }
-    if (
-      result &&
-      typeof result === 'object' &&
-      Array.isArray((result as { entries?: unknown }).entries)
-    ) {
-      return (result as { entries: Record<string, unknown>[] }).entries;
-    }
-    return [];
-  }, [result]);
+  const rows = useMemo(() => resultRows(result), [result]);
 
   if (renderer === 'table') {
     const columns =
@@ -172,7 +163,8 @@ function ResultBody({ outcome, manifest }: ResultViewProps) {
   );
 }
 
-/** map renderer payload: FeatureCollection directly, or {features|rows} wrapped. */
+/** map renderer payload: FeatureCollection directly; {rows[]} 包裹形态不支持
+ * 转 GeoJSON——返回 null 叠加层直接不建（与空集等价但省一次空 source）。 */
 function extractGeojson(result: unknown): unknown {
   if (result && typeof result === 'object' && !Array.isArray(result)) {
     const record = result as Record<string, unknown>;
@@ -180,7 +172,7 @@ function extractGeojson(result: unknown): unknown {
       return { ...record, features: record.features };
     }
     if (Array.isArray(record.rows)) {
-      return { type: 'FeatureCollection', features: [] };
+      return null;
     }
   }
   return result;
