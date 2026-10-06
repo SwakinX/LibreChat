@@ -33,11 +33,7 @@ import {
   Square,
   Trash2,
 } from 'lucide-react';
-import type {
-  MouseEvent as ReactMouseEvent,
-  PointerEvent as ReactPointerEvent,
-  ReactNode,
-} from 'react';
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import {
   useChoicesFrom,
   useExecuteTool,
@@ -49,7 +45,18 @@ import {
   type ResolveResult,
   type ServiceBinding,
 } from './api';
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useLocalize } from '~/hooks';
+import { applyDisplayOrder, displayOrderKeys, moveInDisplayOrder } from './layerOrder';
 import CheckIndicator from './CheckIndicator';
 import {
   featureListOf,
@@ -461,10 +468,6 @@ export default function MapBrowser() {
   /* 文本图层依赖的 glyphs/sprite（style 级配置）。undefined 时地图以空样式
    * 先行创建；异步解析到后触发一次重建。 */
   const [glyphsUrl, setGlyphsUrl] = useState<{ glyphs?: string; sprite?: string }>({});
-  /* 行把手 Pointer 拖拽（不用 HTML5 DnD：拖影/命中受全局样式与浏览器差异影响）：
-   * 把手上按下即捕获指针，移动中命中哪行就交换到哪行，抬起结束。 */
-  const dragKeyRef = useRef<string | null>(null);
-  const [draggingKey, setDraggingKey] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -934,53 +937,23 @@ export default function MapBrowser() {
   const patchLayer = (key: string, patch: Partial<MapLayer>) =>
     setLayers((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
-  /* 拖拽重排（数组序 = 绘制序，底图恒在索引 0 不参与）。 */
-  const reorder = (fromKey: string, toKey: string) => {
-    setLayers((prev) => {
-      const from = prev.findIndex((l) => l.key === fromKey);
-      const to = prev.findIndex((l) => l.key === toKey);
-      if (from < 1 || to < 1 || from === to) {
-        return prev;
-      }
-      const next = [...prev];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-  };
+  /* ── 图层树拖拽（2.22.0，dnd-kit）：树的显示序（自上而下）= 绘制数组
+   * 去掉 base 后的倒序；拖放换算回绘制数组（base 恒在首位），落库语义
+   * 不变（数组序 = 绘制序，localStorage 持久化）。 ── */
+  const treeSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+  const displayKeys = displayOrderKeys(layers);
 
-  const beginDrag = (e: ReactPointerEvent<HTMLSpanElement>, key: string) => {
-    if (e.button !== 0) {
+  const onTreeDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) {
       return;
     }
-    e.preventDefault();
-    const row = (e.currentTarget as HTMLElement).closest('[data-layer-row]');
-    try {
-      row?.setPointerCapture(e.pointerId);
-    } catch {
-      /* 指针未激活（合成事件等）：不捕获也能拖，只是移出行后丢事件 */
-    }
-    dragKeyRef.current = key;
-    setDraggingKey(key);
-  };
-
-  const onDragPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
-    const key = dragKeyRef.current;
-    if (!key) {
+    const moved = moveInDisplayOrder(displayKeys, String(active.id), String(over.id));
+    if (moved === displayKeys) {
       return;
     }
-    const hit = document
-      .elementFromPoint(e.clientX, e.clientY)
-      ?.closest<HTMLElement>('[data-layer-row]');
-    const target = hit?.dataset.layerRow;
-    if (target && target !== key) {
-      reorder(key, target);
-    }
-  };
-
-  const endDrag = () => {
-    dragKeyRef.current = null;
-    setDraggingKey(null);
+    setLayers((prev) => applyDisplayOrder(prev, moved));
   };
 
   const removeLayer = (key: string) => {
@@ -1313,31 +1286,40 @@ export default function MapBrowser() {
           {notice && <p className="text-text-error px-1 pb-1 text-xs">{notice}</p>}
           {/* 图层（顶部 = 最上层；拖拽把手改变绘制次序；右键菜单：缩放/属性/移除；
               点击行仅高亮不打开面板） */}
-          {[...overlayLayers].reverse().map((l) => (
-            <LayerTreeRow
-              key={l.key}
-              layer={l}
-              icon={layerIcon(l)}
-              selected={selectedKey === l.key}
-              dragging={draggingKey === l.key}
-              onSelect={() => {
-                /* 符号面板开着时，点击任意行即把面板切到该图层 */
-                if (panelKey) {
-                  setPanelKey(l.key);
+          <DndContext
+            sensors={treeSensors}
+            collisionDetection={closestCenter}
+            onDragEnd={onTreeDragEnd}
+          >
+            <SortableContext items={displayKeys} strategy={verticalListSortingStrategy}>
+              {displayKeys.map((key) => {
+                const l = layers.find((x) => x.key === key);
+                if (!l) {
+                  return null;
                 }
-                setSelectedKey((prev) => (prev === l.key ? null : l.key));
-              }}
-              onToggleVisible={() => patchLayer(l.key, { visible: !l.visible })}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setCtxMenu({ key: l.key, x: e.clientX, y: e.clientY });
-              }}
-              dragHandle
-              onDragPointerDown={beginDrag}
-              onDragPointerMove={onDragPointerMove}
-              onDragPointerUp={endDrag}
-            />
-          ))}
+                return (
+                  <SortableLayerRow
+                    key={l.key}
+                    layer={l}
+                    icon={layerIcon(l)}
+                    selected={selectedKey === l.key}
+                    onSelect={() => {
+                      /* 符号面板开着时，点击任意行即把面板切到该图层 */
+                      if (panelKey) {
+                        setPanelKey(l.key);
+                      }
+                      setSelectedKey((prev) => (prev === l.key ? null : l.key));
+                    }}
+                    onToggleVisible={() => patchLayer(l.key, { visible: !l.visible })}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setCtxMenu({ key: l.key, x: e.clientX, y: e.clientY });
+                    }}
+                  />
+                );
+              })}
+            </SortableContext>
+          </DndContext>
           {overlayLayers.length === 0 && (
             <p className="px-1 py-3 text-xs text-text-tertiary">
               {localize('com_toolbox_map_empty_layers')}
@@ -1365,7 +1347,6 @@ export default function MapBrowser() {
                     }}
                     icon={<MapIcon className="size-3.5" aria-hidden="true" />}
                     selected={false}
-                    dragging={false}
                     onSelect={() => setSelectedKey(null)}
                     onToggleVisible={() =>
                       setBaseVisibility((prev) => ({ ...prev, [b.name]: !(prev[b.name] ?? true) }))
@@ -1502,58 +1483,73 @@ export default function MapBrowser() {
   );
 }
 
+/** 图层树单行的 sortable 包装：useSortable 必须在组件内部调用；
+ * 底图行不走本包装（不参与排序）。 */
+function SortableLayerRow(
+  props: Omit<
+    React.ComponentProps<typeof LayerTreeRow>,
+    'handleProps' | 'isDragging' | 'setNodeRef' | 'sortableStyle'
+  >,
+) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: props.layer.key,
+  });
+  return (
+    <LayerTreeRow
+      {...props}
+      handleProps={{ ...attributes, ...listeners }}
+      isDragging={isDragging}
+      setNodeRef={setNodeRef}
+      sortableStyle={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    />
+  );
+}
+
 /** 图层树单行：显隐 + 名称 + 拖拽把手 + 右键菜单。样式控制集中在右侧
- * 属性面板；拖拽用 Pointer 事件自实现：把手上按下捕获指针，移动中命中
- * 哪行就交换到哪行，抬起结束。 */
+ * 属性面板；排序由 dnd-kit 驱动（SortableLayerRow 提供把手与位移样式）。 */
 function LayerTreeRow({
   layer,
   icon,
   selected,
-  dragging,
   onSelect,
   onToggleVisible,
   onContextMenu,
-  dragHandle,
-  onDragPointerDown,
-  onDragPointerMove,
-  onDragPointerUp,
+  handleProps,
+  isDragging,
+  setNodeRef,
+  sortableStyle,
 }: {
   layer: MapLayer;
   /** 图层类型图标：数据层点/线/面，瓦片与底图为地图。 */
   icon?: ReactNode;
   selected: boolean;
-  dragging: boolean;
   onSelect: () => void;
   onToggleVisible: () => void;
   onContextMenu: (e: ReactMouseEvent<HTMLElement>) => void;
-  dragHandle?: boolean;
-  onDragPointerDown?: (e: ReactPointerEvent<HTMLSpanElement>, key: string) => void;
-  onDragPointerMove?: (e: ReactPointerEvent<HTMLElement>) => void;
-  onDragPointerUp?: () => void;
+  handleProps?: Record<string, unknown>;
+  isDragging?: boolean;
+  setNodeRef?: (el: HTMLElement | null) => void;
+  sortableStyle?: React.CSSProperties;
 }) {
   const localize = useLocalize();
   return (
-    <div
-      data-layer-row={layer.key}
-      onContextMenu={onContextMenu}
-      onPointerMove={dragHandle ? onDragPointerMove : undefined}
-      onPointerUp={dragHandle ? onDragPointerUp : undefined}
-      onPointerCancel={dragHandle ? onDragPointerUp : undefined}
-    >
+    <div ref={setNodeRef} style={sortableStyle} onContextMenu={onContextMenu}>
       <div
         className={
           'group flex items-center gap-1 rounded-md px-1 py-1 transition-colors ' +
-          (selected || dragging ? 'bg-surface-active-alt' : 'hover:bg-surface-active-alt') +
-          (dragging ? ' ring-1 ring-border-medium' : '')
+          (selected ? 'bg-surface-active-alt' : 'hover:bg-surface-active-alt') +
+          (isDragging ? ' ring-1 ring-border-medium' : '')
         }
       >
-        {dragHandle ? (
+        {handleProps ? (
           <span
-            data-drag-handle
             title={localize('com_toolbox_map_drag_handle')}
             aria-label={localize('com_toolbox_map_drag_handle')}
+            {...handleProps}
             className="text-text-quaternary shrink-0 cursor-grab touch-none rounded p-0.5 opacity-0 transition-opacity hover:text-text-primary active:cursor-grabbing group-hover:opacity-100"
-            onPointerDown={(e) => onDragPointerDown?.(e, layer.key)}
           >
             <GripVertical className="size-3" aria-hidden="true" />
           </span>
