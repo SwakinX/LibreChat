@@ -196,9 +196,11 @@ const AuthContextProvider = ({
 
   const logout = useCallback(
     (redirect?: string) => {
-      if (redirect) {
-        logoutRedirectRef.current = redirect;
-      }
+      /** Explicit logout must land on ?redirect=false: with OPENID_AUTO_REDIRECT
+       * enabled the login page immediately bounces back to the IdP, which would
+       * undo the logout entirely. Expiry-driven logouts keep the plain /login
+       * path and rely on that bounce for silent re-auth. */
+      logoutRedirectRef.current = redirect ?? '/login?redirect=false';
       logoutUser.mutate(undefined);
     },
     [logoutUser],
