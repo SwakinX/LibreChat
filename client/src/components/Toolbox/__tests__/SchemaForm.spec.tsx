@@ -69,9 +69,9 @@ beforeEach(() => {
 });
 
 /** Controlled harness so toggles accumulate like the real page. */
-function Harness({ manifest }: { manifest: typeof manifest }) {
+function Harness({ manifest: m }: { manifest: typeof manifest }) {
   const [values, setValues] = useState<Record<string, unknown>>({});
-  return <SchemaForm manifest={manifest} values={values} onChange={setValues} />;
+  return <SchemaForm manifest={m} values={values} onChange={setValues} />;
 }
 
 describe('SchemaForm v1 widgets', () => {

@@ -3076,6 +3076,7 @@
   "com_toolbox_plugin_launch": "启动宿主软件",
   "com_toolbox_plugin_upgrade": "升级到 {{version}}",
   "com_toolbox_plugin_uninstall": "卸载",
+  "com_toolbox_confirm_remove": "再次点击确认卸载",
   "com_toolbox_plugin_launch_failed": "宿主启动失败",
   "com_toolbox_no_result": "无结果",
   "com_toolbox_widget_browse": "浏览…",

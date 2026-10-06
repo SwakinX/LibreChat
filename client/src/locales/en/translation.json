@@ -3076,6 +3076,7 @@
   "com_toolbox_plugin_launch": "Launch host software",
   "com_toolbox_plugin_upgrade": "Upgrade to {{version}}",
   "com_toolbox_plugin_uninstall": "Uninstall",
+  "com_toolbox_confirm_remove": "Click again to confirm uninstall",
   "com_toolbox_plugin_launch_failed": "Host launch failed",
   "com_toolbox_no_result": "No result",
   "com_toolbox_widget_browse": "Browse…",

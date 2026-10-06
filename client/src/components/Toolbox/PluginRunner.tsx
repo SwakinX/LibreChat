@@ -145,7 +145,7 @@ export default function PluginRunner({ tool }: { tool: MergedTool }) {
           <div>
             <Button
               variant="default"
-              disabled={install.isPending || !hostRoot.trim()}
+              disabled={install.isLoading || !hostRoot.trim()}
               onClick={() => startInstall()}
             >
               {localize('com_toolbox_plugin_install')}
@@ -154,7 +154,7 @@ export default function PluginRunner({ tool }: { tool: MergedTool }) {
         </section>
       )}
 
-      <InstallJobPanel job={job} version={latestVersion} />
+      <InstallJobPanel job={job.data} version={latestVersion} />
 
       {installed && (
         <section className="flex flex-col gap-3">
@@ -162,7 +162,7 @@ export default function PluginRunner({ tool }: { tool: MergedTool }) {
             <Button
               variant="default"
               className="flex items-center gap-1.5"
-              disabled={startRun.isPending}
+              disabled={startRun.isLoading}
               onClick={() => void launch()}
             >
               <Rocket className="size-3.5" aria-hidden="true" />
@@ -172,7 +172,7 @@ export default function PluginRunner({ tool }: { tool: MergedTool }) {
               <Button
                 variant="secondary"
                 className="flex items-center gap-1.5"
-                disabled={install.isPending}
+                disabled={install.isLoading}
                 onClick={() => startInstall(manifest.version)}
               >
                 <Wrench className="size-3.5" aria-hidden="true" />
@@ -180,7 +180,7 @@ export default function PluginRunner({ tool }: { tool: MergedTool }) {
               </Button>
             )}
             <Button
-              variant="danger"
+              variant="destructive"
               className="flex items-center gap-1.5"
               onClick={() => {
                 if (!confirmRemove) {
