@@ -6,8 +6,6 @@
  * OpenIDSessionRefresh provider (requires OPENID_REUSE_TOKENS=true).
  */
 const express = require('express');
-const http = require('http');
-const https = require('https');
 const { logger, SystemCapabilities } = require('@librechat/data-schemas');
 const { requireCapability } = require('~/server/middleware/roles/capabilities');
 const { requireJwtAuth } = require('~/server/middleware');
@@ -278,87 +276,16 @@ router.get(
   handler(() => '/api/v1/map/config'),
 );
 
-/* Map vector-tile capability judgment proxy (2.21.0): iServer only exposes
- * tileFeature/vectorstyles.json on vector-capable services — probing it from
- * the browser puts an unsuppressable 404 in the console for every raster
- * service (dom). Probe SERVER-side instead: the browser always gets a 200,
- * either the Mapbox style JSON or { capable: false }. Styles are immutable
- * per service version; cached per map URL for the process lifetime. iServer
- * may present self-signed TLS (5.28:8443). Path allowlist keeps this from
- * becoming a generic proxy. */
-const ISERVER_AGENT = new http.Agent({ keepAlive: true });
-/* iServer https 实例常为自签名（5.28:8443）：默认放宽校验；ISERVER_TLS_VERIFY=true
- * 时启用严格校验（与 gateway 的 iserver_tls_verify 对齐，2026-10-05 审查项）。 */
-const ISERVER_TLS_VERIFY = String(process.env.ISERVER_TLS_VERIFY || '') === 'true';
-const ISERVER_TLS_AGENT = new https.Agent({
-  rejectUnauthorized: !ISERVER_TLS_VERIFY,
-  keepAlive: true,
-});
-const vectorStyleCache = new Map();
-
-function fetchIserverBuffer(url, timeoutMs = 15000) {
-  return new Promise((resolve, reject) => {
-    const mod = /^https:/i.test(url) ? https : http;
-    const req = mod.request(
-      url,
-      {
-        agent: /^https:/i.test(url) ? ISERVER_TLS_AGENT : ISERVER_AGENT,
-        headers: { 'User-Agent': 'LibreChat-map-panel' },
-      },
-      (res) => {
-        const chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks) }));
-      },
-    );
-    req.setTimeout(timeoutMs, () => req.destroy(new Error('iServer request timed out')));
-    req.on('error', reject);
-    req.end();
-  });
-}
-
-router.get('/map/vectorstyle', async (req, res) => {
-  let mapUrl;
-  try {
-    mapUrl = new URL(String(req.query.url ?? ''));
-  } catch {
-    return res.status(400).json({ message: 'url query parameter required' });
-  }
-  if (
-    !/^\/iserver\/services\//.test(mapUrl.pathname) ||
-    !/\/rest\/maps\/.+/.test(mapUrl.pathname)
-  ) {
-    return res.status(400).json({ message: 'not an iServer REST map url' });
-  }
-  const cacheKey = mapUrl.origin + mapUrl.pathname;
-  const cached = vectorStyleCache.get(cacheKey);
-  if (cached) {
-    return res.status(200).json(cached);
-  }
-  const styleUrl = `${cacheKey}/tileFeature/vectorstyles.json?type=MapBox_GL&styleonly=true&tileURLTemplate=ZXY`;
-  let payload;
-  try {
-    const upstream = await fetchIserverBuffer(styleUrl);
-    if (upstream.status === 200) {
-      try {
-        const style = JSON.parse(upstream.body.toString('utf8'));
-        payload =
-          style && style.version === 8 && style.sources && style.layers
-            ? { capable: true, style }
-            : { capable: false };
-      } catch {
-        payload = { capable: false };
-      }
-    } else {
-      payload = { capable: false };
-    }
-  } catch (error) {
-    logger.warn('[terravox] vectorstyle probe failed:', error.message);
-    payload = { capable: false, error: String(error.message).slice(0, 120) };
-  }
-  vectorStyleCache.set(cacheKey, payload);
-  return res.status(200).json(payload);
-});
+/* Map vector-tile capability judgment proxy. Thin forward since the gateway
+ * migration (contracts 2.20.0, ADR-0011): probing, caching and TLS policy live
+ * in the gateway (GET /api/v1/map/vectorstyle). This side only authenticates
+ * and relays — the browser still never sees an iServer 404 for raster maps. */
+router.get(
+  '/map/vectorstyle',
+  handler(
+    (req) => `/api/v1/map/vectorstyle?url=${encodeURIComponent(String(req.query.url ?? ''))}`,
+  ),
+);
 
 /* Visible service bindings for the current user (contracts 2.16.0): the data
  * source for toolbox layer dropdowns and the map browser's layer tree. */
