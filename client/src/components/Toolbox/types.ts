@@ -38,6 +38,9 @@ export type ToolManifest = {
   dangerous?: boolean;
   /** 2.16.0 presentation group (sidebar grouping); empty = tool_id namespace. */
   display_group?: string;
+  /** 2.22.0 display order within its display_group: ascending; unset sinks
+   * after ordered tools (then tool_id). Ordering is applied gateway-side. */
+  display_order?: number;
   /** 2.16.0 help doc URL — header help button; absent = no button. */
   help_url?: string;
   /** 2.16.0 usage-stats opt-out (gateway stops writing run_reports). */
