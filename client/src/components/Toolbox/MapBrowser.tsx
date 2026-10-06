@@ -52,7 +52,9 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type Modifier,
 } from '@dnd-kit/core';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useLocalize } from '~/hooks';
@@ -943,6 +945,8 @@ export default function MapBrowser() {
   const treeSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
+  /* 图层树是单列列表：拖动锁定竖直轴，横向位移不触发重排 */
+  const treeModifiers: Modifier[] = [restrictToVerticalAxis];
   const displayKeys = displayOrderKeys(layers);
 
   const onTreeDragEnd = ({ active, over }: DragEndEvent) => {
@@ -1289,6 +1293,7 @@ export default function MapBrowser() {
           <DndContext
             sensors={treeSensors}
             collisionDetection={closestCenter}
+            modifiers={treeModifiers}
             onDragEnd={onTreeDragEnd}
           >
             <SortableContext items={displayKeys} strategy={verticalListSortingStrategy}>
