@@ -313,6 +313,7 @@ export function MyRunRecords({
       status: run.status,
       created_at: run.created_at ?? '',
       duration_ms: run.duration_ms ?? null,
+      source: run.source,
       params: cached?.params ?? null,
       result: cached?.result,
       onRestore: cached && onRestoreRun ? onRestoreRun : undefined,

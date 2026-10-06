@@ -21,6 +21,8 @@ export type RunRecordRow = {
   status: string;
   created_at: string;
   duration_ms: number | null;
+  /** 2.24.0：toolbox=浏览器直跑，server=人工表单执行，mcp=AI 调用。 */
+  source?: string;
   /** Expanded content: the run's argument values and its result payload. */
   params?: Record<string, unknown> | null;
   result?: unknown;
@@ -116,6 +118,14 @@ function RunRow({
         <span className="w-12 shrink-0">
           {localize(RUN_STATUS_KEYS[row.status] ?? 'com_toolbox_runs_status_failed')}
         </span>
+        {row.source === 'mcp' && (
+          <span
+            className="shrink-0 rounded bg-surface-active-alt px-1 py-px text-[10px] font-medium text-text-secondary"
+            title={localize('com_toolbox_runs_source_ai')}
+          >
+            {localize('com_toolbox_runs_source_ai')}
+          </span>
+        )}
         <span className="min-w-0 flex-1 truncate">
           {row.created_at ? relativeTime(row.created_at, localize) : ''}
         </span>
