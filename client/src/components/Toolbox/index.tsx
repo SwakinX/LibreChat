@@ -314,8 +314,8 @@ export function MyRunRecords({
       created_at: run.created_at ?? '',
       duration_ms: run.duration_ms ?? null,
       source: run.source,
-      params: cached?.params ?? null,
-      result: cached?.result,
+      params: cached?.params ?? run.params ?? null,
+      result: cached?.result ?? run.result,
       onRestore: cached && onRestoreRun ? onRestoreRun : undefined,
     };
   });

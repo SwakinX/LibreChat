@@ -128,6 +128,9 @@ export type MyRun = {
   status: 'succeeded' | 'failed' | 'stopped' | 'timeout';
   duration_ms?: number | null;
   source?: string;
+  /** 2.25.0：仅 mcp 来源由网关代存（人工调用留在本机缓存）。 */
+  params?: Record<string, unknown> | null;
+  result?: unknown;
   created_at: string;
 };
 
