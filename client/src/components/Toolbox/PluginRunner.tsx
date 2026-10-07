@@ -49,9 +49,10 @@ export default function PluginRunner({ tool }: { tool: MergedTool }) {
     setLaunchError(null);
   }, [manifest.version, local?.installed_version]);
 
-  /* Job done → dismiss the panel; badges flip via the invalidated tools query. */
+  /* Job done → dismiss the panel; badges flip via the invalidated tools query.
+   * Failed jobs stay on screen: the panel carries the error reason. */
   useEffect(() => {
-    if (job.data?.state === 'installed' || job.data?.state === 'failed') {
+    if (job.data?.state === 'installed') {
       setJobId(null);
     }
   }, [job.data?.state]);
