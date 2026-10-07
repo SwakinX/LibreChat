@@ -17,6 +17,7 @@ import {
   fetchRun,
   fetchRunLogs,
   fetchRuns,
+  openPluginHostDir,
   postInstall,
   postRun,
   postStopRun,
@@ -175,6 +176,16 @@ export function useDeleteLocalTool() {
     mutationFn: (toolId: string) => deleteLocalTool(toolId, code),
     onError: guard,
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['toolhost', 'tools'] }),
+  });
+}
+
+/** Open the plugin's recorded host directory in Explorer (1.8.0). */
+export function useOpenPluginHostDir() {
+  const guard = usePairingGuard();
+  const code = useAtomValue(pairingCodeAtom);
+  return useMutation({
+    mutationFn: (toolId: string) => openPluginHostDir(toolId, code),
+    onError: guard,
   });
 }
 

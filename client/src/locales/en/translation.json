@@ -3077,6 +3077,8 @@
   "com_toolbox_plugin_probe_candidates": "Detected candidates (click to use)",
   "com_toolbox_plugin_install": "Install plugin",
   "com_toolbox_plugin_launch": "Launch host software",
+  "com_toolbox_plugin_install_dir": "Install directory",
+  "com_toolbox_plugin_open_dir": "Open directory",
   "com_toolbox_plugin_upgrade": "Upgrade to {{version}}",
   "com_toolbox_plugin_uninstall": "Uninstall",
   "com_toolbox_confirm_remove": "Click again to confirm uninstall",

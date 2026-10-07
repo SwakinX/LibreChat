@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@librechat/client';
-import { Rocket, Trash2, Wrench } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
+import { FolderOpen, Rocket, Trash2, Wrench } from 'lucide-react';
 import type { MergedTool } from './toolStatus';
 import {
   useDeleteLocalTool,
   useInstallJob,
   useInstallTool,
+  useOpenPluginHostDir,
   useStartLocalRun,
 } from './toolhostHooks';
 import { InstallJobPanel } from './LocalRunner';
+import { PathPickInput } from './SchemaForm';
 import { useReportToolRun } from './api';
 import { MyRunRecords } from './index';
 import { useLocalize } from '~/hooks';
@@ -31,12 +33,16 @@ export default function PluginRunner({ tool }: { tool: MergedTool }) {
   const install = useInstallTool();
   const remove = useDeleteLocalTool();
   const startRun = useStartLocalRun();
+  const openDir = useOpenPluginHostDir();
   const reportRun = useReportToolRun();
   const [jobId, setJobId] = useState<string | null>(null);
   const job = useInstallJob(jobId);
   const [hostRoot, setHostRoot] = useState('');
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  /** Host directory recorded by the Toolhost at install time (1.8.0) — shown
+   * on the page and openable in Explorer. */
+  const hostDir = local?.plugin?.host_root ?? '';
 
   useEffect(() => {
     setConfirmRemove(false);
@@ -107,24 +113,27 @@ export default function PluginRunner({ tool }: { tool: MergedTool }) {
           >
             {localize('com_toolbox_plugin_install_warn')}
           </div>
-          <label className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-text-primary">
               {localize('com_toolbox_plugin_host_root')}
               <span className="text-text-error ml-0.5">*</span>
             </span>
-            <input
-              type="text"
-              className="flex w-full rounded-md border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:border-border-xheavy focus:outline-none"
+            {/* 规范目录选择组件（与工具参数 widget=directory 同款）：文本框 +
+                原生「浏览」对话框，路径选择下沉到本机 Toolhost。 */}
+            <PathPickInput
+              mode="directory"
+              browseLabel={localize('com_toolbox_widget_browse')}
               placeholder={localize('com_toolbox_plugin_host_root_placeholder')}
+              dialogTitle={localize('com_toolbox_plugin_host_root')}
               value={hostRoot}
-              onChange={(e) => setHostRoot(e.target.value)}
+              onChange={setHostRoot}
             />
             <span className="text-xs text-text-tertiary">
               {localize('com_toolbox_plugin_host_root_help', {
                 launcher: distribution?.host_launcher ?? '',
               })}
             </span>
-          </label>
+          </div>
           {hints.length > 0 && (
             <div className="flex flex-col gap-1.5">
               <span className="text-xs text-text-tertiary">
@@ -197,6 +206,28 @@ export default function PluginRunner({ tool }: { tool: MergedTool }) {
                 : localize('com_toolbox_plugin_uninstall')}
             </Button>
           </div>
+          {hostDir && (
+            <div className="flex flex-wrap items-center gap-2 text-sm text-text-secondary">
+              <span className="truncate" title={hostDir}>
+                {localize('com_toolbox_plugin_install_dir')}
+                {'：'}
+                {hostDir}
+              </span>
+              <Button
+                variant="secondary"
+                className="flex items-center gap-1.5"
+                disabled={openDir.isLoading}
+                onClick={() =>
+                  openDir.mutateAsync(manifest.tool_id).catch((err: unknown) => {
+                    setLaunchError((err as Error)?.message ?? String(err));
+                  })
+                }
+              >
+                <FolderOpen className="size-3.5" aria-hidden="true" />
+                {localize('com_toolbox_plugin_open_dir')}
+              </Button>
+            </div>
+          )}
           {launchError && (
             <div
               role="alert"

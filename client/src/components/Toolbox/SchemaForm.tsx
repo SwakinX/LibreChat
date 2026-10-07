@@ -569,7 +569,7 @@ function PickerInput({
 
 /** file/directory input + a Browse button that opens the NATIVE Windows
  * dialog via the local Toolhost (browsers never expose local paths). */
-function PathPickInput({
+export function PathPickInput({
   mode,
   accept,
   disabled,

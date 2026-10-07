@@ -184,6 +184,18 @@ export async function fetchHealth(): Promise<{ status: string }> {
   return parse(await toolhostFetch('/healthz', { timeoutMs: 2000 }));
 }
 
+/** Open the plugin's recorded host directory in Explorer (toolhost-local
+ * 1.8.0). The path is the one recorded at install time on the Toolhost side —
+ * never a client-supplied path. */
+export async function openPluginHostDir(toolId: string, pairingCode: string): Promise<void> {
+  await parse(
+    await toolhostFetch(`/v1/local/tools/${encodeURIComponent(toolId)}/open-host-dir`, {
+      method: 'POST',
+      headers: approvalHeaders(pairingCode),
+    }),
+  );
+}
+
 /** Auto-pairing bootstrap (toolhost-local/v1 1.2.0): token-free on purpose —
  * this endpoint exists to hand the credential to the whitelisted origin. */
 export async function fetchPairingCode(): Promise<string> {
