@@ -3040,6 +3040,7 @@
   "com_toolbox_pair_retry": "Retry",
   "com_toolbox_runs_title": "Run history",
   "com_toolbox_runs_source_ai": "AI call",
+  "com_toolbox_map_apply_directive": "Apply to map",
   "com_toolbox_runs_section": "Run history (last {{limit}} · {{count}} total)",
   "com_toolbox_runs_empty": "No runs recorded on this machine yet",
   "com_toolbox_runs_just_now": "just now",

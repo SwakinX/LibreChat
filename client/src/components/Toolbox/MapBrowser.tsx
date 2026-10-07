@@ -1021,6 +1021,31 @@ export default function MapBrowser() {
     void fetchFeatures(key, regId);
   };
 
+  /* 辅助制图（2.26.0）：消费 ResultView「应用到地图」写入的指令——按 reg 逐层
+   * 挂入（addVector 自带去重/要素拉取）；消费即清除，避免刷新重复应用。 */
+  useEffect(() => {
+    if (!mapReady) {
+      return;
+    }
+    let directive: { layers?: { layer: string; name?: string }[] } | null = null;
+    try {
+      const raw = sessionStorage.getItem('toolbox:map-directive');
+      if (raw) {
+        sessionStorage.removeItem('toolbox:map-directive');
+        directive = JSON.parse(raw);
+      }
+    } catch {
+      return;
+    }
+    for (const entry of directive?.layers ?? []) {
+      if (entry?.layer) {
+        addVector(entry.name || entry.layer, entry.layer);
+      }
+    }
+    // 仅地图就绪时消费一次；addVector 的 state 依赖由其自身闭包管理
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady]);
+
   /** 瓦片图层强制重取（刷新按钮）：摘除句柄与 pending，同步 effect 重建。 */
   const recreateHandle = (key: string) => {
     const map = mapRef.current;

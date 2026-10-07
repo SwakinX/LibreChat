@@ -3040,6 +3040,7 @@
   "com_toolbox_pair_retry": "重试",
   "com_toolbox_runs_title": "运行记录",
   "com_toolbox_runs_source_ai": "AI 调用",
+  "com_toolbox_map_apply_directive": "应用到地图",
   "com_toolbox_runs_section": "运行记录（最近 {{limit}} 次内 · 共 {{count}} 次）",
   "com_toolbox_runs_empty": "本机暂无运行记录",
   "com_toolbox_runs_just_now": "刚刚",
