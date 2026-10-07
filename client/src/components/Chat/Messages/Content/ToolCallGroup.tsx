@@ -15,6 +15,10 @@ import {
   getBatchActivityLabelPart,
   getActivityLabelText,
 } from '~/utils';
+import TerravoxResultCard, {
+  collectTerravoxResults,
+  TerravoxInlineSuppressedContext,
+} from './Parts/TerravoxResultCard';
 import { useLocalize, useExpandCollapse, scheduleMessageContentLayoutReconcile } from '~/hooks';
 import { ASK_USER_QUESTION, getSubmittedAskAnswer } from '~/utils/approval';
 import { ToolAuthWarning, ToolAuthWarningContext } from './auth';
@@ -364,6 +368,14 @@ export default function ToolCallGroup({
   const searchCount = activitySummary.webSearchCount + activitySummary.fileSearchCount;
   const searchesOnly = count > 0 && searchCount === count;
 
+  /** terravox 地图结果（2.26.0）：提升（hoist）到折叠面板外常驻——地图是给
+   * 读者看的结果，组收起后必须还在（与 groupAttachments 同一挂点语义）。
+   * 行内卡经 TerravoxInlineSuppressedContext 抑制，不会双份。 */
+  const terravoxResults = useMemo(
+    () => collectTerravoxResults(parts.map(({ part }) => part)),
+    [parts],
+  );
+
   /** Outcome-first header verb. Homogeneous searches, subagents, and questions
    *  read as the activity the assistant performed. Mixed implementation-level
    *  tool calls fall back to the user-facing concept of "actions". */
@@ -535,49 +547,56 @@ export default function ToolCallGroup({
         {shouldRenderBody && (
           <div className="overflow-hidden" ref={expandRef}>
             <ToolAuthWarningContext.Provider value>
-              <div className="flex flex-col py-0.5">
-                {parts.map(({ part, idx }, partIndex) => {
-                  if (part.type === ContentTypes.THINK) {
-                    const think = part.think;
-                    const reasoning = typeof think === 'string' ? think : (think?.value ?? '');
-                    /** A detached-subagent projection carries an empty THINK
-                     *  part flagged `reasoning_unavailable`, which `Part`
-                     *  renders as a `ReasoningMarker`. `ReasoningCompact` has
-                     *  no text to show and returns null, so the marker has to
-                     *  keep going through the standalone path or it vanishes
-                     *  the moment its call joins a group. */
-                    if (reasoning.trim() === '' && part.reasoning_unavailable === true) {
-                      return renderPart(
-                        part,
-                        idx,
-                        isLast && idx === lastContentIdx,
-                        handleToolExpand,
+              <TerravoxInlineSuppressedContext.Provider value>
+                <div className="flex flex-col py-0.5">
+                  {parts.map(({ part, idx }, partIndex) => {
+                    if (part.type === ContentTypes.THINK) {
+                      const think = part.think;
+                      const reasoning = typeof think === 'string' ? think : (think?.value ?? '');
+                      /** A detached-subagent projection carries an empty THINK
+                       *  part flagged `reasoning_unavailable`, which `Part`
+                       *  renders as a `ReasoningMarker`. `ReasoningCompact` has
+                       *  no text to show and returns null, so the marker has to
+                       *  keep going through the standalone path or it vanishes
+                       *  the moment its call joins a group. */
+                      if (reasoning.trim() === '' && part.reasoning_unavailable === true) {
+                        return renderPart(
+                          part,
+                          idx,
+                          isLast && idx === lastContentIdx,
+                          handleToolExpand,
+                        );
+                      }
+                      const streaming = isSubmitting && idx === lastContentIdx;
+                      const isAfterTool =
+                        partIndex > 0 && parts[partIndex - 1]?.part.type === ContentTypes.TOOL_CALL;
+                      /** Mirrors the standalone `Reasoning` path: the authored
+                       *  label wins, generic text is only a fallback. */
+                      const generatedLabel = part.reasoning_label?.trim();
+                      const label =
+                        generatedLabel ||
+                        (streaming ? localize('com_ui_thinking') : localize('com_ui_thoughts'));
+                      return (
+                        <ReasoningCompact
+                          key={`reasoning-${idx}`}
+                          partKeyIndex={getPartKeyIndex(part, idx)}
+                          reasoning={reasoning}
+                          label={label}
+                          showThinking={showThinking}
+                          isAfterTool={isAfterTool}
+                          isStreaming={streaming}
+                        />
                       );
                     }
-                    const streaming = isSubmitting && idx === lastContentIdx;
-                    const isAfterTool =
-                      partIndex > 0 && parts[partIndex - 1]?.part.type === ContentTypes.TOOL_CALL;
-                    /** Mirrors the standalone `Reasoning` path: the authored
-                     *  label wins, generic text is only a fallback. */
-                    const generatedLabel = part.reasoning_label?.trim();
-                    const label =
-                      generatedLabel ||
-                      (streaming ? localize('com_ui_thinking') : localize('com_ui_thoughts'));
-                    return (
-                      <ReasoningCompact
-                        key={`reasoning-${idx}`}
-                        partKeyIndex={getPartKeyIndex(part, idx)}
-                        reasoning={reasoning}
-                        label={label}
-                        showThinking={showThinking}
-                        isAfterTool={isAfterTool}
-                        isStreaming={streaming}
-                      />
+                    return renderPart(
+                      part,
+                      idx,
+                      isLast && idx === lastContentIdx,
+                      handleToolExpand,
                     );
-                  }
-                  return renderPart(part, idx, isLast && idx === lastContentIdx, handleToolExpand);
-                })}
-              </div>
+                  })}
+                </div>
+              </TerravoxInlineSuppressedContext.Provider>
             </ToolAuthWarningContext.Provider>
             {hasPendingAuthRequest && <ToolAuthWarning className="mb-1 mt-2.5" />}
           </div>
@@ -588,6 +607,13 @@ export default function ToolCallGroup({
           <SearchVerticals attachments={groupAttachments} />
           <AttachmentGroup attachments={groupAttachments} />
         </>
+      )}
+      {terravoxResults.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {terravoxResults.map(({ key, args, output }) => (
+            <TerravoxResultCard key={`terravox-${key}`} args={args} output={output} />
+          ))}
+        </div>
       )}
     </div>
   );

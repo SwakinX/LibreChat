@@ -2,8 +2,9 @@
  * @jest-environment jsdom
  */
 import React from 'react';
+import { ContentTypes } from 'librechat-data-provider';
 import { render, screen, fireEvent } from '@testing-library/react';
-import TerravoxResultCard from '../Parts/TerravoxResultCard';
+import TerravoxResultCard, { collectTerravoxResults } from '../Parts/TerravoxResultCard';
 import MapPanel from '~/components/Toolbox/MapPanel';
 
 /* 聊天内 terravox 空间结果卡（2.26.0）：输出即 gateway ExecuteResult JSON——
@@ -114,5 +115,49 @@ describe('TerravoxResultCard', () => {
   ])('renders nothing for %s', (_label, output) => {
     const { container } = render(<TerravoxResultCard output={output as string | null} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe('collectTerravoxResults', () => {
+  const toolCall = (overrides: Record<string, unknown>) => ({
+    type: ContentTypes.TOOL_CALL,
+    [ContentTypes.TOOL_CALL]: {
+      id: 'tc_1',
+      name: 'spatial_query_layer_mcp_terravox',
+      args: '{"layer":"reg:abc:PG"}',
+      output: mapOutput,
+      ...overrides,
+    },
+  });
+  const part = (call: Record<string, unknown>) => ({ part: call, idx: 0 });
+
+  it('collects terravox map results with the tool-call id as key', () => {
+    const parts = [part({ type: ContentTypes.TEXT, text: 'hi' }), part(toolCall({}))] as never[];
+    expect(collectTerravoxResults(parts.map((p) => p.part))).toEqual([
+      { key: 'tc_1', args: '{"layer":"reg:abc:PG"}', output: mapOutput },
+    ]);
+  });
+
+  it('ignores other MCP servers, other renderers, and error-text outputs', () => {
+    const parts = [
+      part(toolCall({ id: 'tc_other', name: 'fs_read_mcp_nextcloud' })),
+      part(
+        toolCall({
+          id: 'tc_json',
+          name: 'spatial_registry_layers_mcp_terravox',
+          output: JSON.stringify({ run_id: 'r', renderer: 'json', result: [] }),
+        }),
+      ),
+      part(toolCall({ id: 'tc_err', output: 'handler not registered' })),
+    ] as never[];
+    expect(collectTerravoxResults(parts.map((p) => p.part))).toEqual([]);
+  });
+
+  it('falls back to the index-based key when the call has no id', () => {
+    const parts = [part(toolCall({ id: undefined })), part(toolCall({ id: undefined }))] as never[];
+    expect(collectTerravoxResults(parts.map((p) => p.part)).map((h) => h.key)).toEqual([
+      'terravox-idx-0',
+      'terravox-idx-1',
+    ]);
   });
 });
