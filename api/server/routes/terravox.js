@@ -495,6 +495,14 @@ router.post(
   adminHandler(() => '/api/v1/admin/tools/import', { method: 'POST', body: (req) => req.body }),
 );
 
+/* Export the full tool configuration (all manifests + enabled flags) in the
+ * exact shape /admin/tools/import accepts — backup and environment migration
+ * download straight from the admin tools page. */
+router.get(
+  '/admin/tools/export',
+  adminHandler(() => '/api/v1/admin/tools/export'),
+);
+
 /* Pending repo updates for the admin panel's confirm-before-publish flow
  * (2026-09-28 governance: users never see repo versions ahead of the
  * approved manifest until an admin confirms them). Literal route declared
