@@ -10,7 +10,7 @@ import {
 } from 'librechat-data-provider';
 import type { TAttachment, PartMetadata } from 'librechat-data-provider';
 import { useLocalize, useProgress, useExpandCollapse, useLazyCollapseBody } from '~/hooks';
-import TerravoxResultCardInline, { TERRAVOX_MCP_SERVER } from './Parts/TerravoxResultCard';
+import { TERRAVOX_MCP_SERVER, TerravoxResultCardInline } from './Parts/TerravoxResultCard';
 import { cn, getToolDisplayLabel, logger, openInNewTab } from '~/utils';
 import { ToolIcon, getToolIconType, isError } from './ToolOutput';
 import { useMCPIconMap, useMCPServerNames } from '~/hooks/MCP';

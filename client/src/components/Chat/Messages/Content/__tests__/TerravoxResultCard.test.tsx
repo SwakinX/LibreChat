@@ -4,6 +4,7 @@
 import React from 'react';
 import { ContentTypes } from 'librechat-data-provider';
 import { render, screen, fireEvent } from '@testing-library/react';
+import type { TMessageContentParts } from 'librechat-data-provider';
 import TerravoxResultCard, { collectTerravoxResults } from '../Parts/TerravoxResultCard';
 import MapPanel from '~/components/Toolbox/MapPanel';
 
@@ -129,33 +130,35 @@ describe('collectTerravoxResults', () => {
       ...overrides,
     },
   });
-  const part = (call: Record<string, unknown>) => ({ part: call, idx: 0 });
-
   it('collects terravox map results with the tool-call id as key', () => {
-    const parts = [part({ type: ContentTypes.TEXT, text: 'hi' }), part(toolCall({}))] as never[];
-    expect(collectTerravoxResults(parts.map((p) => p.part))).toEqual([
+    const parts = [
+      { type: ContentTypes.TEXT, text: 'hi' } as TMessageContentParts,
+      toolCall({}) as TMessageContentParts,
+    ];
+    expect(collectTerravoxResults(parts)).toEqual([
       { key: 'tc_1', args: '{"layer":"reg:abc:PG"}', output: mapOutput },
     ]);
   });
 
   it('ignores other MCP servers, other renderers, and error-text outputs', () => {
     const parts = [
-      part(toolCall({ id: 'tc_other', name: 'fs_read_mcp_nextcloud' })),
-      part(
-        toolCall({
-          id: 'tc_json',
-          name: 'spatial_registry_layers_mcp_terravox',
-          output: JSON.stringify({ run_id: 'r', renderer: 'json', result: [] }),
-        }),
-      ),
-      part(toolCall({ id: 'tc_err', output: 'handler not registered' })),
-    ] as never[];
-    expect(collectTerravoxResults(parts.map((p) => p.part))).toEqual([]);
+      toolCall({ id: 'tc_other', name: 'fs_read_mcp_nextcloud' }),
+      toolCall({
+        id: 'tc_json',
+        name: 'spatial_registry_layers_mcp_terravox',
+        output: JSON.stringify({ run_id: 'r', renderer: 'json', result: [] }),
+      }),
+      toolCall({ id: 'tc_err', output: 'handler not registered' }),
+    ] as TMessageContentParts[];
+    expect(collectTerravoxResults(parts)).toEqual([]);
   });
 
   it('falls back to the index-based key when the call has no id', () => {
-    const parts = [part(toolCall({ id: undefined })), part(toolCall({ id: undefined }))] as never[];
-    expect(collectTerravoxResults(parts.map((p) => p.part)).map((h) => h.key)).toEqual([
+    const parts = [
+      toolCall({ id: undefined }),
+      toolCall({ id: undefined }),
+    ] as TMessageContentParts[];
+    expect(collectTerravoxResults(parts).map((h) => h.key)).toEqual([
       'terravox-idx-0',
       'terravox-idx-1',
     ]);
