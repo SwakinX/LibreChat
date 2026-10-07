@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { CloudUpload, FileDown } from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
 import MarkdownLite from '~/components/Chat/Messages/Content/MarkdownLite';
+import MapDirectiveCard, { type MapDirective } from './MapDirectiveCard';
 import { downloadProxyFile, saveTempToDrive } from './api';
 import CloudPickerDialog from './CloudPickerDialog';
 import { useLocalize } from '~/hooks';
@@ -134,42 +135,9 @@ function ResultBody({ outcome, manifest }: ResultViewProps) {
   }
 
   if (renderer === 'map_directive') {
-    const d = (result ?? {}) as {
-      directive?: { title?: string; layers?: { layer: string; name: string }[]; notes?: string };
-    };
-    const layers = d.directive?.layers ?? [];
-    return (
-      <div className="flex flex-col gap-2 rounded-lg border border-border-medium bg-surface-tertiary p-3">
-        {d.directive?.title && (
-          <div className="text-text-default text-sm font-medium">{d.directive.title}</div>
-        )}
-        <ul className="flex flex-col gap-1 text-xs text-text-secondary">
-          {layers.map((l) => (
-            <li key={l.layer}>
-              <span className="text-text-default">{l.name}</span>{' '}
-              <span className="font-mono text-text-tertiary">{l.layer}</span>
-            </li>
-          ))}
-        </ul>
-        {d.directive?.notes && (
-          <div className="text-xs text-text-tertiary">{d.directive.notes}</div>
-        )}
-        <button
-          type="button"
-          className="cursor-pointer self-start rounded-md border border-border-light bg-surface-active-alt px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover"
-          onClick={() => {
-            try {
-              sessionStorage.setItem('toolbox:map-directive', JSON.stringify(d.directive ?? {}));
-            } catch {
-              /* 忽略存储失败 */
-            }
-            window.location.href = '/toolbox?panel=map';
-          }}
-        >
-          {localize('com_toolbox_map_apply_directive')}
-        </button>
-      </div>
-    );
+    /* 指令卡与聊天内 TerravoxResultCard 共用（同一 sessionStorage 指令通道） */
+    const d = (result ?? {}) as { directive?: MapDirective };
+    return <MapDirectiveCard directive={d.directive ?? {}} />;
   }
 
   if (renderer === 'link') {

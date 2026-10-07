@@ -10,6 +10,7 @@ import {
 } from 'librechat-data-provider';
 import type { TAttachment, PartMetadata } from 'librechat-data-provider';
 import { useLocalize, useProgress, useExpandCollapse, useLazyCollapseBody } from '~/hooks';
+import TerravoxResultCard, { TERRAVOX_MCP_SERVER } from './Parts/TerravoxResultCard';
 import { cn, getToolDisplayLabel, logger, openInNewTab } from '~/utils';
 import { ToolIcon, getToolIconType, isError } from './ToolOutput';
 import { useMCPIconMap, useMCPServerNames } from '~/hooks/MCP';
@@ -395,6 +396,11 @@ export default function ToolCall({
           )}
         </div>
       </div>
+      {/* terravox 空间结果（2.26.0）：地图预览/指令卡常驻卡下，不藏进折叠面板——
+          地图是结果本身，折叠面板里只放原始 JSON。非空间渲染器渲染 null。 */}
+      {isMCPToolCall && mcpServerName === TERRAVOX_MCP_SERVER && (
+        <TerravoxResultCard args={_args} output={output} />
+      )}
       {showOAuth && (
         <div className="flex w-full flex-col gap-2.5">
           <div className="mb-1 mt-2">
