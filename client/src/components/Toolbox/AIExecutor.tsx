@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, MonitorPlay, Square, TriangleAlert } from 'lucide-react';
+import { usePairingCode, useLocalRun, useStartLocalRun, useStopRun } from './toolhostHooks';
 import { useLocalPending, useResolveLocalPending, type LocalPending } from './api';
-import { useLocalRun, useStartLocalRun, useStopRun } from './toolhostHooks';
+import { fetchPairingCode, ToolhostError } from './toolhost';
 import { useLocalize } from '~/hooks';
 
 /**
@@ -58,8 +59,10 @@ function PendingCard({ item }: { item: LocalPending }) {
   const [claimLost, setClaimLost] = useState(false);
   const started = useRef(false);
   const reported = useRef(false);
+  const repaired = useRef(false);
   const startedAt = useRef<number>(Date.now());
   const run = useLocalRun(runId);
+  const { saveCode } = usePairingCode();
 
   const finish = (
     status: 'succeeded' | 'failed' | 'stopped' | 'timeout',
@@ -88,6 +91,40 @@ function PendingCard({ item }: { item: LocalPending }) {
     );
   };
 
+  const failNow = (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    setStartError(message);
+    finish('failed', message);
+  };
+
+  const launch = () => {
+    startRun.mutate(
+      { toolId: item.tool_id, arguments: item.params },
+      {
+        onSuccess: (job) => setRunId(job.run_id),
+        onError: (err) => {
+          /* 403 = 配对码缺失/轮换（换 Toolhost、删码重启都会轮换）——与工具箱
+             同款自愈：useStartLocalRun 的守卫已清旧码，这里免 token 取新码后
+             自动重跑一次；仍失败才把 failed 回传给模型。 */
+          if (err instanceof ToolhostError && err.status === 403 && !repaired.current) {
+            repaired.current = true;
+            saveCode('');
+            fetchPairingCode()
+              .then((code) => {
+                if (code) {
+                  saveCode(code);
+                }
+                launch();
+              })
+              .catch(failNow);
+            return;
+          }
+          failNow(err);
+        },
+      },
+    );
+  };
+
   /* Start exactly once (StrictMode double-effect included via started ref +
    * the localStorage claim). A start failure resolves the pending as failed —
    * the waiting model must never hang past the gateway budget on a dead
@@ -106,17 +143,7 @@ function PendingCard({ item }: { item: LocalPending }) {
     }
     started.current = true;
     startedAt.current = Date.now();
-    startRun.mutate(
-      { toolId: item.tool_id, arguments: item.params },
-      {
-        onSuccess: (job) => setRunId(job.run_id),
-        onError: (err) => {
-          const message = err instanceof Error ? err.message : String(err);
-          setStartError(message);
-          finish('failed', message);
-        },
-      },
-    );
+    launch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id, claimLost]);
 

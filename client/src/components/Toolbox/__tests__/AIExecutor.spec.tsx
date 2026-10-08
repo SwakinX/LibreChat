@@ -14,10 +14,33 @@ let mockStartError: Error | null = null;
 const mockResolveCalls: Array<Record<string, unknown>> = [];
 const mockStopCalls: string[] = [];
 const mockInvalidate = jest.fn();
+const mockSaveCode = jest.fn();
+let mockFetchedPairingCode: string | null = null;
+let mockStartErrorOnce = false;
+/* 工厂内定义的 ToolhostError 类——beforeEach 里经 requireMock 取引用（工厂
+   在 import 阶段执行，测试模块顶层的绑定那时还没初始化）。 */
+let MockToolhostError: any;
 
 jest.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: mockInvalidate }),
 }));
+
+jest.mock('../toolhost', () => {
+  class TE extends Error {
+    status?: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  }
+  return {
+    ToolhostError: TE,
+    fetchPairingCode: () =>
+      mockFetchedPairingCode != null
+        ? Promise.resolve(mockFetchedPairingCode)
+        : Promise.reject(new Error('pairing unavailable')),
+  };
+});
 
 jest.mock('../api', () => ({
   useLocalPending: () => ({ data: { items: mockItems } }),
@@ -30,14 +53,18 @@ jest.mock('../api', () => ({
 }));
 
 jest.mock('../toolhostHooks', () => ({
+  usePairingCode: () => ({ saveCode: mockSaveCode }),
   useStartLocalRun: () => ({
     mutate: (
       vars: { toolId: string; arguments: Record<string, unknown> },
       opts?: { onSuccess?: (job: { run_id: string }) => void; onError?: (err: Error) => void },
     ) => {
       mockStartCalls.push(vars);
-      if (mockStartError) {
-        opts?.onError?.(mockStartError);
+      /* mockStartErrorOnce：只让第一次调用失败（403 自愈重试场景） */
+      const shouldFail =
+        mockStartError != null && (!mockStartErrorOnce || mockStartCalls.length === 1);
+      if (shouldFail) {
+        opts?.onError?.(mockStartError as Error);
       } else {
         opts?.onSuccess?.({ run_id: 'run-1' });
       }
@@ -70,12 +97,16 @@ const PENDING: LocalPending = {
 };
 
 beforeEach(() => {
+  MockToolhostError = jest.requireMock('../toolhost').ToolhostError;
   mockItems = [];
   mockCurrentRun = undefined;
   mockStartError = null;
+  mockStartErrorOnce = false;
   mockStartCalls.length = 0;
   mockResolveCalls.length = 0;
   mockStopCalls.length = 0;
+  mockFetchedPairingCode = null;
+  mockSaveCode.mockClear();
   mockInvalidate.mockClear();
   localStorage.clear();
 });
@@ -160,5 +191,42 @@ describe('AIExecutor (global pending executor)', () => {
     expect(mockStartCalls).toEqual([]);
     expect(mockResolveCalls).toEqual([]);
     expect(screen.queryByTestId('ai-executor-card')).not.toBeInTheDocument();
+  });
+
+  it('403 on start self-heals: clears code, fetches a fresh pairing code, retries once', async () => {
+    mockItems = [PENDING];
+    mockStartError = new MockToolhostError(403, 'pairing code is invalid');
+    mockStartErrorOnce = true;
+    mockFetchedPairingCode = 'fresh-code';
+    const { rerender } = render(<AIExecutor />);
+
+    await waitFor(() => {
+      expect(mockStartCalls).toHaveLength(2);
+    });
+    expect(mockSaveCode).toHaveBeenCalledWith('');
+    expect(mockSaveCode).toHaveBeenCalledWith('fresh-code');
+
+    /* 重跑成功 → 正常走运行/回传链 */
+    mockCurrentRun = { status: 'succeeded', result: { ok: 1 } };
+    rerender(<AIExecutor />);
+    await waitFor(() => {
+      expect(mockResolveCalls).toHaveLength(1);
+    });
+    expect(mockResolveCalls[0]).toMatchObject({ status: 'succeeded', result: { ok: 1 } });
+  });
+
+  it('403 self-heal falls back to failed when the fresh pairing code is unavailable', async () => {
+    mockItems = [PENDING];
+    mockStartError = new MockToolhostError(403, 'pairing code is invalid');
+    mockFetchedPairingCode = null; // pairing-code 文件不可读
+    render(<AIExecutor />);
+
+    await waitFor(() => {
+      expect(mockResolveCalls).toHaveLength(1);
+    });
+    expect(mockResolveCalls[0]).toMatchObject({
+      status: 'failed',
+      error: 'pairing unavailable',
+    });
   });
 });
