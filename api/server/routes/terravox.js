@@ -9,6 +9,8 @@ const express = require('express');
 const { logger, SystemCapabilities } = require('@librechat/data-schemas');
 const { requireCapability } = require('~/server/middleware/roles/capabilities');
 const { requireJwtAuth } = require('~/server/middleware');
+const { getMCPManager } = require('~/config');
+const { invalidateCachedTools } = require('~/server/services/Config');
 const openIDSessionRefresh = require('~/server/services/OpenIDSessionRefresh');
 
 const router = express.Router();
@@ -397,16 +399,85 @@ router.use('/admin', requireCapability(SystemCapabilities.ACCESS_ADMIN));
 const adminHandler =
   (path, options = {}) =>
   async (req, res) => {
+    const { mcpRefresh, ...forwardOptions } = options;
+    if (mcpRefresh) {
+      /* 工具目录写操作成功后，全员刷新 MCP 工具缓存（2026-10-08）：后台
+       * expose/登记/启停变更下，各用户聊天侧的 tools/list 是按连接缓存的，
+       * 不主动刷就会一直看到旧清单（无状态 MCP 无 listChanged 推送）。 */
+      const originalSend = res.send.bind(res);
+      res.send = (body) => {
+        try {
+          if (res.statusCode < 400) {
+            void refreshAllMcpToolCaches();
+          }
+        } catch (hookError) {
+          logger.warn('[terravox] mcpRefresh hook failed:', hookError?.message);
+        }
+        return originalSend(body);
+      };
+    }
     try {
       await forwardToGateway(req, res, path(req), {
-        ...options,
+        ...forwardOptions,
         service: true,
-        body: options.body?.(req),
+        body: forwardOptions.body?.(req),
       });
     } catch (error) {
       res.status(500).json({ message: error.message });
     }
   };
+
+/** Invalidate and refresh every user's cached terravox MCP tool list, plus the
+ * app-level boot snapshot. Defensive against SDK internals shifting (bundled
+ * private fields): worst case it no-ops with a warning — the toolbox refresh
+ * button / api restart remain the fallback. */
+async function refreshAllMcpToolCaches() {
+  let refreshed = 0;
+  const refreshOne = async (connection, label) => {
+    if (!connection || typeof connection.refreshToolList !== 'function') {
+      return;
+    }
+    try {
+      await connection.refreshToolList();
+      refreshed += 1;
+    } catch (error) {
+      logger.warn('[terravox] MCP tool cache refresh failed:', label, error?.message);
+    }
+  };
+  try {
+    const manager = getMCPManager();
+    if (!manager) {
+      return { refreshed };
+    }
+    try {
+      const appRepo = manager.appConnections;
+      const appConn = appRepo?.has?.('terravox') ? appRepo.get('terravox') : null;
+      await refreshOne(typeof appConn?.then === 'function' ? await appConn : appConn, 'app');
+    } catch (error) {
+      logger.warn('[terravox] app-level MCP refresh failed:', error?.message);
+    }
+    const userConnections = manager.userConnections;
+    if (userConnections && typeof userConnections.forEach === 'function') {
+      for (const [userId, repo] of userConnections) {
+        try {
+          if (!repo?.has?.('terravox')) {
+            continue;
+          }
+          const conn = repo.get('terravox');
+          await refreshOne(typeof conn?.then === 'function' ? await conn : conn, `user:${userId}`);
+          await invalidateCachedTools({ userId, serverName: 'terravox' });
+        } catch (error) {
+          logger.warn('[terravox] MCP refresh failed for user:', userId, error?.message);
+        }
+      }
+    }
+    logger.info(`[terravox] MCP tool caches refreshed (${refreshed} connections)`);
+    return { refreshed };
+  } catch (error) {
+    logger.warn('[terravox] MCP tool cache refresh unavailable:', error?.message);
+    return { refreshed };
+  }
+}
 
 router.get(
   '/admin/groups',
@@ -504,12 +575,20 @@ router.get(
 router.post(
   '/admin/tools',
   jsonBody,
-  adminHandler(() => '/api/v1/admin/tools', { method: 'POST', body: (req) => req.body }),
+  adminHandler(() => '/api/v1/admin/tools', {
+    method: 'POST',
+    body: (req) => req.body,
+    mcpRefresh: true,
+  }),
 );
 router.post(
   '/admin/tools/import',
   jsonBody,
-  adminHandler(() => '/api/v1/admin/tools/import', { method: 'POST', body: (req) => req.body }),
+  adminHandler(() => '/api/v1/admin/tools/import', {
+    method: 'POST',
+    body: (req) => req.body,
+    mcpRefresh: true,
+  }),
 );
 
 /* Export the full tool configuration (all manifests + enabled flags) in the
@@ -542,6 +621,7 @@ router.put(
   adminHandler((req) => `/api/v1/admin/tools/${encodeURIComponent(req.params.toolId)}`, {
     method: 'PUT',
     body: (req) => req.body,
+    mcpRefresh: true,
   }),
 );
 router.patch(
@@ -550,14 +630,24 @@ router.patch(
   adminHandler((req) => `/api/v1/admin/tools/${encodeURIComponent(req.params.toolId)}`, {
     method: 'PATCH',
     body: (req) => req.body,
+    mcpRefresh: true,
   }),
 );
 router.delete(
   '/admin/tools/:toolId',
   adminHandler((req) => `/api/v1/admin/tools/${encodeURIComponent(req.params.toolId)}`, {
     method: 'DELETE',
+    mcpRefresh: true,
   }),
 );
+
+/* Unified MCP tool-cache refresh (admin panel button): refreshes the app-level
+ * snapshot and every connected user's cached tools/list for the terravox
+ * server — runs inside this process, nothing forwarded to the gateway. */
+router.post('/admin/mcp-refresh', async (req, res) => {
+  const result = await refreshAllMcpToolCaches();
+  res.json({ ...result, refreshed_at: new Date().toISOString() });
+});
 router.get(
   '/admin/gitea/repos',
   adminHandler((req) => {
