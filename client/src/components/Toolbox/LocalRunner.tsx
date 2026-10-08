@@ -83,7 +83,7 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
   const effectiveManifest = useMemo<ToolManifest>(
     () => ({
       ...manifest,
-      parameters: manifest.parameters ?? local?.parameters,
+      parameters: manifest.parameters ?? local?.parameters ?? undefined,
       form: (manifest.form as ToolManifest['form']) ?? (local?.form as ToolManifest['form']),
       result:
         (manifest.result as ToolManifest['result']) ?? (local?.result as ToolManifest['result']),

@@ -2,7 +2,7 @@
  * @jest-environment @happy-dom/jest-environment
  */
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import type { LocalPending } from '../api';
 import AIExecutor from '../AIExecutor';
@@ -11,14 +11,13 @@ let mockItems: LocalPending[];
 let mockCurrentRun: { status: string; result?: unknown; error?: string | null } | undefined;
 const mockStartCalls: Array<{ toolId: string; arguments: Record<string, unknown> }> = [];
 let mockStartError: Error | null = null;
+let mockStartErrorOnce = false;
 const mockResolveCalls: Array<Record<string, unknown>> = [];
-const mockStopCalls: string[] = [];
 const mockInvalidate = jest.fn();
 const mockSaveCode = jest.fn();
 let mockFetchedPairingCode: string | null = null;
-let mockStartErrorOnce = false;
-/* 工厂内定义的 ToolhostError 类——beforeEach 里经 requireMock 取引用（工厂
-   在 import 阶段执行，测试模块顶层的绑定那时还没初始化）。 */
+let mockOrphanRuns: Array<{ run_id: string; status: string; created_at: string }> = [];
+/* 类在 jest.mock 工厂里定义，beforeEach 经 requireMock 取引用再 new。 */
 let MockToolhostError: any;
 
 jest.mock('@tanstack/react-query', () => ({
@@ -39,6 +38,7 @@ jest.mock('../toolhost', () => {
       mockFetchedPairingCode != null
         ? Promise.resolve(mockFetchedPairingCode)
         : Promise.reject(new Error('pairing unavailable')),
+    fetchRuns: () => Promise.resolve({ runs: mockOrphanRuns }),
   };
 });
 
@@ -60,7 +60,7 @@ jest.mock('../toolhostHooks', () => ({
       opts?: { onSuccess?: (job: { run_id: string }) => void; onError?: (err: Error) => void },
     ) => {
       mockStartCalls.push(vars);
-      /* mockStartErrorOnce：只让第一次调用失败（403 自愈重试场景） */
+      /* mockStartErrorOnce：只让第一次调用失败（403 自愈/孤儿接管重试场景） */
       const shouldFail =
         mockStartError != null && (!mockStartErrorOnce || mockStartCalls.length === 1);
       if (shouldFail) {
@@ -71,15 +71,12 @@ jest.mock('../toolhostHooks', () => ({
     },
   }),
   useLocalRun: () => ({ data: mockCurrentRun }),
-  useStopRun: () => ({ mutate: (runId: string) => mockStopCalls.push(runId) }),
 }));
 
 jest.mock('~/hooks', () => ({
-  useLocalize: () => (key: string, rest?: { 0?: string }) =>
-    rest && rest[0] != null ? `${key}:${rest[0]}` : key,
+  useLocalize: () => (key: string) => key,
 }));
 
-/* StatusPopover styles via cn — keep it a pure join here. */
 jest.mock('~/utils', () => ({
   cn: (...classes: unknown[]) => classes.filter(Boolean).join(' '),
 }));
@@ -93,7 +90,7 @@ const PENDING: LocalPending = {
   dangerous: false,
   params: { target: 'D:\\data' },
   created_at: '2026-10-08T00:00:00Z',
-  expires_at: '2026-10-08T00:01:40Z',
+  expires_at: '2026-10-08T01:00:00Z',
 };
 
 beforeEach(() => {
@@ -104,15 +101,16 @@ beforeEach(() => {
   mockStartErrorOnce = false;
   mockStartCalls.length = 0;
   mockResolveCalls.length = 0;
-  mockStopCalls.length = 0;
   mockFetchedPairingCode = null;
+  mockOrphanRuns = [];
   mockSaveCode.mockClear();
   mockInvalidate.mockClear();
   localStorage.clear();
 });
 
-describe('AIExecutor (global pending executor)', () => {
-  it('renders nothing without pending items', () => {
+describe('AIExecutor (headless pending executor)', () => {
+  it('renders nothing (no UI) even with pending items', () => {
+    mockItems = [PENDING];
     const { container } = render(<AIExecutor />);
     expect(container).toBeEmptyDOMElement();
   });
@@ -124,11 +122,6 @@ describe('AIExecutor (global pending executor)', () => {
     expect(mockStartCalls).toEqual([
       { toolId: 'demo.desktop_echo', arguments: { target: 'D:\\data' } },
     ]);
-    expect(screen.getByText('com_aiexec_starting')).toBeInTheDocument();
-
-    mockCurrentRun = { status: 'running' };
-    rerender(<AIExecutor />);
-    expect(screen.getByText('com_aiexec_running')).toBeInTheDocument();
 
     mockCurrentRun = { status: 'succeeded', result: { rows: [1] } };
     rerender(<AIExecutor />);
@@ -159,38 +152,37 @@ describe('AIExecutor (global pending executor)', () => {
   it('resolves the pending as failed on local start failure (Toolhost offline etc.)', async () => {
     mockItems = [PENDING];
     mockStartError = new Error('network error');
+    mockOrphanRuns = []; // 无孤儿 run 可接管
     render(<AIExecutor />);
     await waitFor(() => {
       expect(mockResolveCalls).toHaveLength(1);
     });
     expect(mockResolveCalls[0]).toMatchObject({ status: 'failed', error: 'network error' });
-    expect(screen.getByText('com_aiexec_start_failed:network error')).toBeInTheDocument();
   });
 
-  it('offers stop while running and never reports twice', async () => {
+  it('start abort adopts the orphan toolhost run and reports its real result', async () => {
     mockItems = [PENDING];
+    mockStartError = new Error('signal is aborted without reason');
+    mockOrphanRuns = [
+      { run_id: 'run-adopt', status: 'running', created_at: new Date().toISOString() },
+    ];
     const { rerender } = render(<AIExecutor />);
-    mockCurrentRun = { status: 'running' };
-    rerender(<AIExecutor />);
 
-    screen.getByRole('button', { name: 'com_aiexec_stop' }).click();
-    expect(mockStopCalls).toEqual(['run-1']);
+    await waitFor(() => {
+      expect(mockStartCalls).toHaveLength(1);
+      expect(mockResolveCalls).toHaveLength(0);
+    });
 
-    mockCurrentRun = { status: 'stopped' };
+    mockCurrentRun = { status: 'succeeded', result: { report: '质检完成' } };
     rerender(<AIExecutor />);
     await waitFor(() => {
       expect(mockResolveCalls).toHaveLength(1);
     });
-    expect(mockResolveCalls[0]).toMatchObject({ status: 'stopped' });
-  });
-
-  it('a tab that lost the cross-tab claim does not start or report', () => {
-    localStorage.setItem(`terravox-ai-claim-${PENDING.id}`, '1');
-    mockItems = [PENDING];
-    render(<AIExecutor />);
-    expect(mockStartCalls).toEqual([]);
-    expect(mockResolveCalls).toEqual([]);
-    expect(screen.queryByTestId('ai-executor-card')).not.toBeInTheDocument();
+    expect(mockResolveCalls[0]).toMatchObject({
+      id: PENDING.id,
+      status: 'succeeded',
+      result: { report: '质检完成' },
+    });
   });
 
   it('403 on start self-heals: clears code, fetches a fresh pairing code, retries once', async () => {
@@ -206,7 +198,6 @@ describe('AIExecutor (global pending executor)', () => {
     expect(mockSaveCode).toHaveBeenCalledWith('');
     expect(mockSaveCode).toHaveBeenCalledWith('fresh-code');
 
-    /* 重跑成功 → 正常走运行/回传链 */
     mockCurrentRun = { status: 'succeeded', result: { ok: 1 } };
     rerender(<AIExecutor />);
     await waitFor(() => {
@@ -228,5 +219,13 @@ describe('AIExecutor (global pending executor)', () => {
       status: 'failed',
       error: 'pairing unavailable',
     });
+  });
+
+  it('a tab that lost the cross-tab claim does not start or report', () => {
+    localStorage.setItem(`terravox-ai-claim-${PENDING.id}`, '1');
+    mockItems = [PENDING];
+    render(<AIExecutor />);
+    expect(mockStartCalls).toEqual([]);
+    expect(mockResolveCalls).toEqual([]);
   });
 });

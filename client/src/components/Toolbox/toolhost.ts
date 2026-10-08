@@ -275,6 +275,9 @@ export async function postRun(
     await toolhostFetch(`/v1/local/tools/${encodeURIComponent(toolId)}/runs`, {
       method: 'POST',
       headers: jsonHeaders(pairingCode),
+      /* 120s：慢运行时（arcpy conda env 等）的冷启动会超过默认 15s——
+       * 客户端中止时 Toolhost 侧 run 其实照常启动（孤儿 run），2026-10-08。 */
+      timeoutMs: 120_000,
       /* RunRequest is extra=forbid — the dangerous-tool confirmation gate is
        * purely client-side and `confirmed` must never be sent. */
       body: JSON.stringify(body),

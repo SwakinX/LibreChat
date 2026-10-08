@@ -1,24 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Loader2, MonitorPlay, Square, TriangleAlert } from 'lucide-react';
-import { usePairingCode, useLocalRun, useStartLocalRun, useStopRun } from './toolhostHooks';
 import { useLocalPending, useResolveLocalPending, type LocalPending } from './api';
-import { fetchPairingCode, ToolhostError } from './toolhost';
-import { useLocalize } from '~/hooks';
+import { usePairingCode, useLocalRun, useStartLocalRun } from './toolhostHooks';
+import { fetchPairingCode, fetchRuns, ToolhostError } from './toolhost';
 
 /**
  * AI 本机执行器（local-tool-plan §9 / contracts 2.28.0，全局挂载于 Root）。
  *
- * 模型经 MCP 调 desktop 工具时 gateway 挂起该调用并建 pending；本组件轮询
+ * **无 UI**（用户指示 2026-10-08：对话里的运行指示已足够）：轮询 gateway 的
  * pending 清单，在本机启动 Toolhost 运行、轮询终态、把结果回传 gateway——
  * 挂起的 MCP 调用随即完成，模型同轮拿到结果。批准语义由聊天里的原生 HITL
- * 审批承担（卡片不做二次确认，参数已在审批卡过目，gateway 侧亦已 schema
- * 校验）；服务端铁律不变——浏览器是本地执行的唯一发起方。
+ * 审批承担（参数已在审批卡过目，gateway 侧亦已 schema 校验）；铁律不变——
+ * 浏览器是本地执行的唯一发起方。
+ *
+ * 启动失败的自愈（顺序）：403 配对码失效 → 清码 + 免 token 取新码重跑一次；
+ * 其他启动错误（含客户端超时中止——arcpy 等运行时冷启动会超过客户端超时，
+ * 而 Toolhost 侧 run 其实已经启动，用户实测「signal is aborted」但工具仍在
+ * 运行）→ 探测该工具近 5 分钟内的活动 run 并接管轮询；都没有才把 failed
+ * 回传给模型。
  */
 
 /** Cross-tab claim: exactly one tab runs a given pending. localStorage is
  * synchronous, so the race window is negligible; a crashed claimant just
- * costs the run its gateway timeout (100s) instead of a duplicate execution. */
+ * costs the run its gateway timeout instead of a duplicate execution. */
 function claimPending(id: string): boolean {
   const key = `terravox-ai-claim-${id}`;
   if (localStorage.getItem(key)) {
@@ -31,31 +35,20 @@ function claimPending(id: string): boolean {
 export default function AIExecutor() {
   const { data } = useLocalPending();
   const items = data?.items ?? [];
-  if (items.length === 0) {
-    return null;
-  }
   return (
-    <div
-      className="fixed bottom-4 end-4 z-50 flex w-80 flex-col gap-2"
-      role="region"
-      aria-label="AI local execution"
-    >
+    <>
       {items.map((item) => (
-        <PendingCard key={item.id} item={item} />
+        <PendingExecution key={item.id} item={item} />
       ))}
-    </div>
+    </>
   );
 }
 
-function PendingCard({ item }: { item: LocalPending }) {
-  const localize = useLocalize();
+function PendingExecution({ item }: { item: LocalPending }) {
   const queryClient = useQueryClient();
   const resolve = useResolveLocalPending();
   const startRun = useStartLocalRun();
-  const stopRun = useStopRun();
   const [runId, setRunId] = useState<string | null>(null);
-  const [startError, setStartError] = useState<string | null>(null);
-  const [reporting, setReporting] = useState(false);
   const [claimLost, setClaimLost] = useState(false);
   const started = useRef(false);
   const reported = useRef(false);
@@ -73,7 +66,6 @@ function PendingCard({ item }: { item: LocalPending }) {
       return;
     }
     reported.current = true;
-    setReporting(true);
     resolve.mutate(
       {
         id: item.id,
@@ -84,7 +76,7 @@ function PendingCard({ item }: { item: LocalPending }) {
       },
       {
         onSettled: () => {
-          /* 终态已记账——刷新清单让卡片退场（回传被 409 拒绝同样退场） */
+          /* 终态已记账——刷新清单让本执行实例退场（回传被 409 拒绝同样退场） */
           void queryClient.invalidateQueries({ queryKey: ['terravox', 'local-pending'] });
         },
       },
@@ -93,8 +85,24 @@ function PendingCard({ item }: { item: LocalPending }) {
 
   const failNow = (err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
-    setStartError(message);
     finish('failed', message);
+  };
+
+  /** 启动请求超时中止 ≠ 没启动：Toolhost 侧 run 往往已在跑（慢运行时冷启动）。
+   *  找到该工具近 5 分钟内的活动 run 就接管轮询；返回 null 表示确实没启动。 */
+  const adoptOrphanRun = async (): Promise<string | null> => {
+    try {
+      const { runs } = await fetchRuns({ toolId: item.tool_id, limit: 10 });
+      const cutoff = startedAt.current - 5 * 60_000;
+      const active = runs.find(
+        (r) =>
+          (r.status === 'running' || r.status === 'preparing') &&
+          new Date(r.created_at ?? 0).getTime() >= cutoff,
+      );
+      return active?.run_id ?? null;
+    } catch {
+      return null;
+    }
   };
 
   const launch = () => {
@@ -105,7 +113,7 @@ function PendingCard({ item }: { item: LocalPending }) {
         onError: (err) => {
           /* 403 = 配对码缺失/轮换（换 Toolhost、删码重启都会轮换）——与工具箱
              同款自愈：useStartLocalRun 的守卫已清旧码，这里免 token 取新码后
-             自动重跑一次；仍失败才把 failed 回传给模型。 */
+             自动重跑一次。 */
           if (err instanceof ToolhostError && err.status === 403 && !repaired.current) {
             repaired.current = true;
             saveCode('');
@@ -119,16 +127,21 @@ function PendingCard({ item }: { item: LocalPending }) {
               .catch(failNow);
             return;
           }
-          failNow(err);
+          /* 其他启动失败（典型：客户端超时中止）→ 先尝试接管孤儿 run */
+          void adoptOrphanRun().then((orphan) => {
+            if (orphan) {
+              setRunId(orphan);
+            } else {
+              failNow(err);
+            }
+          });
         },
       },
     );
   };
 
   /* Start exactly once (StrictMode double-effect included via started ref +
-   * the localStorage claim). A start failure resolves the pending as failed —
-   * the waiting model must never hang past the gateway budget on a dead
-   * Toolhost; the error surfaces in the conversation. */
+   * the localStorage claim). */
   useEffect(() => {
     if (claimLost) {
       return;
@@ -137,7 +150,7 @@ function PendingCard({ item }: { item: LocalPending }) {
       return;
     }
     if (!claimPending(item.id)) {
-      /* 另一个标签页已认领——本标签页完全退场（不渲染、不轮询、不回传） */
+      /* 另一个标签页已认领——本标签页完全退场 */
       setClaimLost(true);
       return;
     }
@@ -157,64 +170,5 @@ function PendingCard({ item }: { item: LocalPending }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run.data?.status]);
 
-  if (claimLost) {
-    return null;
-  }
-
-  if (startError) {
-    return (
-      <div
-        className="rounded-xl border border-border-light bg-surface-primary-alt p-3 shadow-lg"
-        data-testid="ai-executor-card"
-      >
-        <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-          <MonitorPlay className="size-4 text-amber-500" aria-hidden="true" />
-          {item.tool_name}
-        </div>
-        <p className="text-text-error mt-1 flex items-start gap-1.5 text-xs" role="alert">
-          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-          {localize('com_aiexec_start_failed', { 0: startError })}
-        </p>
-      </div>
-    );
-  }
-
-  const runStatus = run.data?.status;
-  const active =
-    reporting === false &&
-    (runStatus === 'preparing' || runStatus === 'running' || runStatus == null);
-  let phaseKey: string;
-  if (reporting) {
-    phaseKey = 'com_aiexec_reporting';
-  } else if (runStatus === 'preparing' || runStatus === 'running') {
-    phaseKey = 'com_aiexec_running';
-  } else {
-    phaseKey = 'com_aiexec_starting';
-  }
-
-  return (
-    <div
-      className="rounded-xl border border-border-light bg-surface-primary-alt p-3 shadow-lg"
-      data-testid="ai-executor-card"
-    >
-      <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-        <MonitorPlay className="size-4 text-amber-500" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate">{item.tool_name}</span>
-        {active && runId && (
-          <button
-            type="button"
-            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border-medium px-1.5 py-0.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
-            onClick={() => stopRun.mutate(runId)}
-          >
-            <Square className="size-3" aria-hidden="true" />
-            {localize('com_aiexec_stop')}
-          </button>
-        )}
-      </div>
-      <p className="mt-1 flex items-center gap-1.5 text-xs text-text-secondary">
-        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-        {localize(phaseKey)}
-      </p>
-    </div>
-  );
+  return null;
 }
