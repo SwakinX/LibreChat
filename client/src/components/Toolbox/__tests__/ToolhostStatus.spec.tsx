@@ -21,6 +21,12 @@ jest.mock('../toolhostHooks', () => ({
   useAutoPairing: () => mockAuto,
 }));
 
+jest.mock('../api', () => ({
+  useToolhostReleaseInfo: () => ({
+    data: { version: '1.0.0', download_url: 'https://gitea.example/x.zip', size: 19_000_000 },
+  }),
+}));
+
 jest.mock('~/hooks', () => ({
   useLocalize: () => (key: string) => key,
 }));

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Cloud, CloudOff, Loader2, ExternalLink } from 'lucide-react';
+import { Cloud, CloudOff, Loader2, ExternalLink, Unlink } from 'lucide-react';
 import { useNextcloudStatus, usePollLink, useStartLink, useUnlink } from './api';
 import StatusPopover from './StatusPopover';
 import { useLocalize } from '~/hooks';
@@ -54,10 +54,11 @@ export function NextcloudConnectCompact() {
     panelBody = (
       <button
         type="button"
-        className="text-text-error w-fit underline decoration-dotted"
+        className="flex w-fit items-center gap-1 text-red-600 underline decoration-dotted dark:text-red-400"
         disabled={unlink.isLoading}
         onClick={() => unlink.mutate()}
       >
+        <Unlink className="size-3" aria-hidden="true" />
         {localize('com_toolbox_unlink')}
       </button>
     );

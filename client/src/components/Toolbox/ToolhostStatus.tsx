@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
-import { KeyRound, Loader2, MonitorCheck, MonitorX } from 'lucide-react';
+import { Download, KeyRound, Loader2, MonitorCheck, MonitorX } from 'lucide-react';
 import { useAutoPairing, usePairingCode, useToolhostHealth } from './toolhostHooks';
+import { useToolhostReleaseInfo } from './api';
 import { pairingRejectedAtom } from './atoms';
 import StatusPopover from './StatusPopover';
 import { useLocalize } from '~/hooks';
@@ -57,7 +58,10 @@ export function ToolhostStatusCompact() {
   let panelBody: ReactNode;
   if (offline) {
     panelBody = (
-      <p className="text-text-tertiary">{localize('com_toolbox_toolhost_offline_hint')}</p>
+      <div className="flex flex-col gap-2">
+        <p className="text-text-tertiary">{localize('com_toolbox_toolhost_offline_hint')}</p>
+        <ToolhostInstallGuide />
+      </div>
     );
   } else if (code) {
     panelBody = <p className="text-text-tertiary">{localize('com_toolbox_local_run_hint')}</p>;
@@ -131,3 +135,35 @@ export function ToolhostStatusCompact() {
 }
 
 export default ToolhostStatusCompact;
+
+/** 离线安装引导卡（4b③）：发布仓版本 + 下载直链 + 三步安装说明。
+ * 发布信息取自 /toolhost/release（公开分发仓 latest）；不可用时隐藏下载钮，
+ * 仅保留步骤说明。 */
+function ToolhostInstallGuide() {
+  const localize = useLocalize();
+  const { data: release } = useToolhostReleaseInfo(true);
+  const version = release?.version ?? null;
+  return (
+    <div className="rounded-lg border border-border-medium bg-surface-secondary p-2.5">
+      <p className="text-xs font-medium text-text-primary">
+        {localize('com_toolbox_toolhost_install_title')}
+        {version ? ` · v${version}` : ''}
+      </p>
+      <ol className="list-decimal space-y-0.5 ps-4 text-xs text-text-tertiary">
+        <li>{localize('com_toolbox_toolhost_install_step1')}</li>
+        <li>{localize('com_toolbox_toolhost_install_step2')}</li>
+        <li>{localize('com_toolbox_toolhost_install_step3')}</li>
+      </ol>
+      {release?.download_url && (
+        <a
+          href={release.download_url}
+          className="mt-1 flex w-fit items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
+        >
+          <Download className="size-3" aria-hidden="true" />
+          {localize('com_toolbox_toolhost_download')}
+          {release.size ? ` (${Math.max(1, Math.round(release.size / 1024 / 1024))} MB)` : ''}
+        </a>
+      )}
+    </div>
+  );
+}

@@ -25,6 +25,14 @@ function toError(err: unknown): ApiError {
   return error;
 }
 
+export type ToolhostReleaseInfo = {
+  version: string | null;
+  name?: string;
+  size?: number;
+  updated_at?: string;
+  download_url?: string;
+};
+
 async function get<T>(url: string): Promise<T> {
   try {
     return (await request.get(url)) as T;
@@ -387,3 +395,14 @@ export const saveTempToDrive = (token: string, dir: string, filename?: string) =
     dir,
     ...(filename ? { filename } : {}),
   });
+
+/** Toolhost 安装包发布信息（公开分发仓 latest；引导卡下载源）。 */
+export function useToolhostReleaseInfo(enabled: boolean) {
+  return useQuery({
+    queryKey: ['terravox', 'toolhost-release'],
+    queryFn: () => get<ToolhostReleaseInfo>('/api/terravox/toolhost/release-info'),
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+}
