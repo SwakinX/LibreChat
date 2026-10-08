@@ -451,8 +451,8 @@ async function refreshAllMcpToolCaches() {
     }
     try {
       const appRepo = manager.appConnections;
-      const appConn = appRepo?.has?.('terravox') ? appRepo.get('terravox') : null;
-      await refreshOne(typeof appConn?.then === 'function' ? await appConn : appConn, 'app');
+      const appConn = appRepo?.connections?.get?.('terravox');
+      await refreshOne(appConn, 'app');
     } catch (error) {
       logger.warn('[terravox] app-level MCP refresh failed:', error?.message);
     }
@@ -460,11 +460,13 @@ async function refreshAllMcpToolCaches() {
     if (userConnections && typeof userConnections.forEach === 'function') {
       for (const [userId, repo] of userConnections) {
         try {
-          if (!repo?.has?.('terravox')) {
-            continue;
+          /* 只碰已建立的连接（repo.connections 是 serverName→connection 的
+             同步 Map）——has/get 是 async 且会惰性建连，不用它们探测。 */
+          const conn = repo?.connections?.get?.('terravox');
+          if (!conn) {
+            continue; // 无活跃连接 = 无陈旧缓存，下次聊天自然取新清单
           }
-          const conn = repo.get('terravox');
-          await refreshOne(typeof conn?.then === 'function' ? await conn : conn, `user:${userId}`);
+          await refreshOne(conn, `user:${userId}`);
           await invalidateCachedTools({ userId, serverName: 'terravox' });
         } catch (error) {
           logger.warn('[terravox] MCP refresh failed for user:', userId, error?.message);
