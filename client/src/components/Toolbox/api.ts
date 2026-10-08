@@ -406,3 +406,48 @@ export function useToolhostReleaseInfo(enabled: boolean) {
     retry: false,
   });
 }
+
+/** AI 发起的待执行本机调用（contracts 2.28.0）：模型经 MCP 调 desktop 工具时
+ * gateway 挂起该调用并建 pending；执行器轮询本清单，在本机跑完后回传终态。
+ * params 是模型给出（HITL edit 后）且已过 gateway schema 校验的最终值——
+ * 只读使用，前端不提供任何修改入口。 */
+export type LocalPending = {
+  id: string;
+  tool_id: string;
+  tool_name: string;
+  description: string;
+  version?: string | null;
+  dangerous: boolean;
+  params: Record<string, unknown>;
+  parameters?: ToolManifest['parameters'];
+  form?: ToolManifest['form'];
+  created_at: string;
+  expires_at: string;
+};
+
+export const useLocalPending = () =>
+  useQuery({
+    queryKey: ['terravox', 'local-pending'],
+    queryFn: () => get<{ items: LocalPending[] }>('/api/terravox/local/pending'),
+    refetchInterval: 5000,
+    retry: false,
+  });
+
+export type PendingResolution = {
+  id: string;
+  status: 'succeeded' | 'failed' | 'stopped' | 'timeout';
+  duration_ms?: number | null;
+  error?: string | null;
+  result?: unknown;
+};
+
+export const useResolveLocalPending = () =>
+  useMutation({
+    mutationFn: (args: PendingResolution) => {
+      const { id, ...body } = args;
+      return post<{ resolved: boolean }>(
+        `/api/terravox/local/pending/${encodeURIComponent(id)}/result`,
+        body,
+      );
+    },
+  });

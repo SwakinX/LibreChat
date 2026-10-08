@@ -370,6 +370,23 @@ router.get(
   }),
 );
 
+/* AI 本机执行 pending 通道（local-tool-plan §9 / contracts 2.28.0）：模型经
+ * MCP 调 desktop 工具时 gateway 挂起建 pending；浏览器执行器轮询本清单、
+ * 在本机 Toolhost 跑完后回传终态（同轮回传给模型）。用户 JWT 身份，
+ * 属主过滤与一次迁移都在 gateway 侧。 */
+router.get(
+  '/local/pending',
+  handler(() => '/api/v1/local/pending'),
+);
+router.post(
+  '/local/pending/:pendingId/result',
+  jsonBody,
+  handler((req) => `/api/v1/local/pending/${encodeURIComponent(req.params.pendingId)}/result`, {
+    method: 'POST',
+    body: (req) => req.body,
+  }),
+);
+
 /* Admin surface for the admin panel: tool/group CRUD, batch import, handler
  * list. All calls arrive server-side from the admin panel (Bearer JWT, no
  * browser session cookie), so they always forward with the service token plus

@@ -38,6 +38,7 @@ import useDrawerDismiss from '~/hooks/Nav/useDrawerDismiss';
 import useSidebarToggle from '~/hooks/Nav/useSidebarToggle';
 import useSidebarState from '~/hooks/Nav/useSidebarState';
 import { TermsAndConditionsModal } from '~/components/ui';
+import AIExecutor from '~/components/Toolbox/AIExecutor';
 import useDrawerSwipe from '~/hooks/Nav/useDrawerSwipe';
 import { useHealthCheck } from '~/data-provider';
 import { Banner } from '~/components/Banners';
@@ -207,6 +208,9 @@ export default function Root() {
                 </div>
               </PromptGroupsProvider>
               <KeyboardShortcutsProvider />
+              {/* AI 本机执行器：聊天里模型调 desktop 工具（经原生 HITL 批准后）
+                  在本机跑 Toolhost 并同轮回传结果——所有已登录页面全局生效 */}
+              <AIExecutor />
             </AgentsMapContext.Provider>
             {config?.interface?.termsOfService?.modalAcceptance === true && (
               <TermsAndConditionsModal
