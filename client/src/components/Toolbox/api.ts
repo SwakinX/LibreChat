@@ -433,20 +433,6 @@ export const useLocalPending = () =>
     retry: false,
   });
 
-/** LibreChat 原生端点：作废本人对 terravox MCP server 的工具缓存并重连。
- * 后台改 expose/登记后，聊天侧工具清单按用户连接缓存、不自动更新（无状态
- * MCP 无 listChanged 推送）——工具箱此按钮是用户侧的手动刷新入口。 */
-export async function reinitializeTerravoxMcp(): Promise<{ success: boolean; message?: string }> {
-  try {
-    return (await request.post('/api/mcp/terravox/reinitialize')) as {
-      success: boolean;
-      message?: string;
-    };
-  } catch (err) {
-    throw toError(err);
-  }
-}
-
 export type PendingResolution = {
   id: string;
   status: 'succeeded' | 'failed' | 'stopped' | 'timeout';
