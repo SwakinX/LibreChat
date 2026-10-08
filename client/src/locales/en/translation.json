@@ -2995,7 +2995,7 @@
   "com_toolbox_toolhost_offline_hint": "Start TerraVox Desktop to install and run desktop tools on this machine",
   "com_toolbox_toolhost_install_title": "Local tool service not detected",
   "com_toolbox_toolhost_install_step1": "Download the package and extract to a long-term folder (e.g. D:\\TerraVox\\Toolhost)",
-  "com_toolbox_toolhost_install_step2": "Run install.ps1 (registers autostart and starts the service)",
+  "com_toolbox_toolhost_install_step2": "Right-click install.ps1 → Run with PowerShell (registers autostart and starts the service)",
   "com_toolbox_toolhost_install_step3": "Come back to this page — it connects automatically",
   "com_toolbox_toolhost_download": "Download installer",
   "com_toolbox_toolhost_pair_prompt": "Pairing code",
