@@ -503,6 +503,14 @@ router.get(
   adminHandler(() => '/api/v1/admin/tools/export'),
 );
 
+/* Toolhost installer release info for the toolbox install guide card: latest
+ * stable release of the public dist repo (version + anonymous download URL).
+ * Read-only; any logged-in user may fetch it. */
+router.get(
+  '/toolhost/release-info',
+  handler(() => '/api/v1/toolhost/release'),
+);
+
 /* Pending repo updates for the admin panel's confirm-before-publish flow
  * (2026-09-28 governance: users never see repo versions ahead of the
  * approved manifest until an admin confirms them). Literal route declared
