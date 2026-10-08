@@ -323,6 +323,51 @@ describe('LocalRunner', () => {
     expect(screen.getByText('com_toolbox_runs_empty')).toBeInTheDocument();
   });
 
+  it('installed: manifest (gateway) is the runtime authority for params/form — local tool.json is only the offline fallback', () => {
+    const merged = tool({
+      status: 'installed',
+      manifest: {
+        ...tool().manifest,
+        form: {
+          order: ['text'],
+          fields: { text: { widget: 'textarea', placeholder: 'manifest placeholder' } },
+        },
+      },
+      local: {
+        ...local('1.0.0'),
+        form: {
+          order: ['text'],
+          fields: { text: { widget: 'textarea', placeholder: 'local placeholder' } },
+        },
+      } as MergedTool['local'],
+    });
+    render(<LocalRunner tool={merged} />);
+
+    expect(screen.getByPlaceholderText('manifest placeholder')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('local placeholder')).not.toBeInTheDocument();
+  });
+
+  it('installed with missing manifest form: local tool.json supplies the form (offline fallback)', () => {
+    const bare = tool({ status: 'installed', local: local('1.0.0') });
+    const manifest = { ...bare.manifest, form: undefined } as MergedTool['manifest'];
+    render(
+      <LocalRunner
+        tool={{
+          ...bare,
+          manifest,
+          local: {
+            ...local('1.0.0'),
+            form: {
+              order: ['text'],
+              fields: { text: { widget: 'textarea', placeholder: 'local placeholder' } },
+            },
+          } as MergedTool['local'],
+        }}
+      />,
+    );
+    expect(screen.getByPlaceholderText('local placeholder')).toBeInTheDocument();
+  });
+
   it('damaged: warning alert, run blocked, repair reinstalls the installed version', async () => {
     mockHooks.install.mutateAsync.mockResolvedValue({ job_id: 'j9' });
     render(

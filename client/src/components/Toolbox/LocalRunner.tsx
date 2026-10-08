@@ -77,12 +77,16 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const { manifest, local, status, latestVersion } = tool;
+  /* manifest（Gateway 落库版）是运行时权威（local-tool-plan §4.2）——后台改参数/
+   * 表单/渲染即时生效；本地包内 tool.json 只在清单缺字段时离线兜底（Gitea 断网、
+   * 目录缓存不可用）。2026-10-08 翻转：原「已装记录优先」导致后台改参不生效。 */
   const effectiveManifest = useMemo<ToolManifest>(
     () => ({
       ...manifest,
-      parameters: local?.parameters ?? manifest.parameters,
-      form: (local?.form as ToolManifest['form']) ?? manifest.form,
-      result: (local?.result as ToolManifest['result']) ?? manifest.result,
+      parameters: manifest.parameters ?? local?.parameters,
+      form: (manifest.form as ToolManifest['form']) ?? (local?.form as ToolManifest['form']),
+      result:
+        (manifest.result as ToolManifest['result']) ?? (local?.result as ToolManifest['result']),
     }),
     [manifest, local],
   );
