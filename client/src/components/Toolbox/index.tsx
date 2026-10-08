@@ -1,8 +1,16 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@librechat/client';
 import { useSearchParams } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, HelpCircle, Map as MapIcon, MonitorX, Play, Wrench } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  AlertTriangle,
+  HelpCircle,
+  Map as MapIcon,
+  MonitorX,
+  Play,
+  RefreshCw,
+  Wrench,
+} from 'lucide-react';
 import type { ExecuteResult, ToolManifest } from './types';
 import {
   isDesktopTool,
@@ -11,9 +19,9 @@ import {
   isWebTool,
   type MergedTool,
 } from './toolStatus';
+import { executeUpload, reinitializeTerravoxMcp, useExecuteTool, useMyRunsForTool } from './api';
 import { RunRecordsSection, type RunRecordRow } from './RunRecordsSection';
 import { useAuthContext, useDocumentTitle, useLocalize } from '~/hooks';
-import { executeUpload, useExecuteTool, useMyRunsForTool } from './api';
 import { cacheRun, getCachedRun } from './runParamsCache';
 import { useMergedTools } from './toolhostHooks';
 import PluginRunner from './PluginRunner';
@@ -85,6 +93,7 @@ export default function Toolbox() {
         {selected && (
           <code className="text-text-quaternary shrink-0 text-xs">{selected.manifest.tool_id}</code>
         )}
+        <McpRefreshButton />
         {/* 帮助按钮：manifest.help_url 配了才显示（管理端可配），新开标签页 */}
         {selected?.manifest.help_url && (
           <a
@@ -115,6 +124,70 @@ export default function Toolbox() {
         </div>
       )}
     </div>
+  );
+}
+
+/** 后台改 expose / 登记新工具后，聊天侧的 MCP 工具清单按用户连接缓存、不自动
+ * 更新（无状态 MCP 无 listChanged 推送）——此按钮调 LibreChat 原生 reinitialize
+ * 作废本人缓存并重连，之后新发起的对话即见最新工具清单。 */
+export function McpRefreshButton() {
+  const localize = useLocalize();
+  const [phase, setPhase] = useState<'idle' | 'loading' | 'done' | 'failed'>('idle');
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refresh = useMutation({
+    mutationFn: () => reinitializeTerravoxMcp(),
+    onSuccess: (result) => setPhase(result.success ? 'done' : 'failed'),
+    onError: () => setPhase('failed'),
+  });
+  useEffect(
+    () => () => {
+      if (resetTimer.current) {
+        clearTimeout(resetTimer.current);
+      }
+    },
+    [],
+  );
+  const run = () => {
+    if (resetTimer.current) {
+      clearTimeout(resetTimer.current);
+    }
+    setPhase('loading');
+    refresh.mutate(undefined, {
+      onSettled: () => {
+        resetTimer.current = setTimeout(() => setPhase('idle'), 5000);
+      },
+    });
+  };
+
+  let label = localize('com_toolbox_mcp_refresh');
+  if (phase === 'loading') {
+    label = localize('com_toolbox_mcp_refreshing');
+  } else if (phase === 'done') {
+    label = localize('com_toolbox_mcp_refresh_done');
+  } else if (phase === 'failed') {
+    label = localize('com_toolbox_mcp_refresh_failed');
+  }
+  const failed = phase === 'failed';
+  return (
+    <button
+      type="button"
+      title={localize('com_toolbox_mcp_refresh_title')}
+      disabled={phase === 'loading'}
+      aria-live="polite"
+      className={cn(
+        'flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors',
+        failed
+          ? 'border-text-error/40 text-text-error'
+          : 'border-border-medium text-text-secondary hover:bg-surface-active-alt hover:text-text-primary',
+      )}
+      onClick={run}
+    >
+      <RefreshCw
+        className={cn('size-3.5', phase === 'loading' && 'animate-spin')}
+        aria-hidden="true"
+      />
+      {label}
+    </button>
   );
 }
 
