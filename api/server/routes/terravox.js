@@ -373,9 +373,10 @@ router.get(
 );
 
 /* AI 本机执行 pending 通道（local-tool-plan §9 / contracts 2.28.0）：模型经
- * MCP 调 desktop 工具时 gateway 挂起建 pending；浏览器执行器轮询本清单、
- * 在本机 Toolhost 跑完后回传终态（同轮回传给模型）。用户 JWT 身份，
- * 属主过滤与一次迁移都在 gateway 侧。 */
+ * MCP 调 desktop 工具时 gateway 挂起建 pending（等待无网关侧超时——外层
+ * 兜底为 LibreChat MCP 客户端传输上限）；浏览器执行器轮询本清单、在本机
+ * Toolhost 跑完后回传终态（同轮回传给模型）。用户 JWT 身份，属主过滤与
+ * 一次迁移都在 gateway 侧。 */
 router.get(
   '/local/pending',
   handler(() => '/api/v1/local/pending'),
