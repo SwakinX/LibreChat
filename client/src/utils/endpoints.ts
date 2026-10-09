@@ -84,11 +84,16 @@ export const getAvailableEndpoints = (
   return availableEndpoints;
 };
 
+/** 部署内部端点：仅作会话标题生成（librechat.yaml `titleEndpoint` 指向，
+ *  addParams 关思考）——不对外供用户选择，mapEndpoints 统一过滤后下拉/
+ *  提及/切换等所有入口均不可见。 */
+const HIDDEN_ENDPOINTS = new Set(['TerraVox 标题']);
+
 export function mapEndpoints(endpointsConfig: t.TEndpointsConfig) {
   const filter = getEndpointsFilter(endpointsConfig);
-  return getAvailableEndpoints(filter, endpointsConfig).sort(
-    (a, b) => (endpointsConfig?.[a]?.order ?? 0) - (endpointsConfig?.[b]?.order ?? 0),
-  );
+  return getAvailableEndpoints(filter, endpointsConfig)
+    .filter((endpoint) => !HIDDEN_ENDPOINTS.has(endpoint))
+    .sort((a, b) => (endpointsConfig?.[a]?.order ?? 0) - (endpointsConfig?.[b]?.order ?? 0));
 }
 
 const firstLocalConvoKey = LocalStorageKeys.LAST_CONVO_SETUP + '_0';
