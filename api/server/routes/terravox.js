@@ -627,6 +627,17 @@ router.put(
     mcpRefresh: true,
   }),
 );
+/* 参数回写仓库（2.30.0）：manifest 管理字段合并提交到仓库根 tool.json
+ * （contents API，服务写账号身份）。gitea_repo 通道回写即运行时生效；
+ * gitea_release 通道为协作通知。 */
+router.post(
+  '/admin/tools/:toolId/sync-repo',
+  jsonBody,
+  adminHandler((req) => `/api/v1/admin/tools/${encodeURIComponent(req.params.toolId)}/sync-repo`, {
+    method: 'POST',
+    body: (req) => req.body,
+  }),
+);
 router.patch(
   '/admin/tools/:toolId',
   jsonBody,
