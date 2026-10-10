@@ -23,6 +23,8 @@ export type RunRecordRow = {
   duration_ms: number | null;
   /** 2.24.0：toolbox=浏览器直跑，server=人工表单执行，mcp=AI 调用。 */
   source?: string;
+  /** 脚本合集（2.30.0）：该次运行选中的脚本名（行头小徽标）。 */
+  script_label?: string | null;
   /** Expanded content: the run's argument values and its result payload. */
   params?: Record<string, unknown> | null;
   result?: unknown;
@@ -124,6 +126,14 @@ function RunRow({
             title={localize('com_toolbox_runs_source_ai')}
           >
             {localize('com_toolbox_runs_source_ai')}
+          </span>
+        )}
+        {row.script_label && (
+          <span
+            className="shrink-0 rounded bg-surface-active-alt px-1 py-px text-[10px] font-medium text-text-secondary"
+            title={row.script_label}
+          >
+            {row.script_label}
           </span>
         )}
         <span className="min-w-0 flex-1 truncate">

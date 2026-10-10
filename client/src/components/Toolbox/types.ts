@@ -62,12 +62,20 @@ export type ToolManifest = {
     catalog_tool_id?: string;
     /** desktop arm: where the Toolhost pulls the package from. */
     distribution?: {
-      source?: { type: 'gitea_release'; owner: string; repo: string };
+      source?: {
+        type: 'gitea_release' | 'gitea_repo';
+        owner: string;
+        repo: string;
+        /** gitea_repo（2.30.0）：跟踪分支，缺省 main。 */
+        ref?: string;
+      };
       /** Supplemental fields (tool.json fallback), trusted because admin-registered. */
       version?: string;
       package_sha256?: string;
       launcher?: string;
       runtime?: 'self-contained' | 'standard-python' | 'arcpy3';
+      /** gitea_repo（2.30.0）：单脚本入口（仓库内相对路径）。 */
+      entry?: string;
       /** plugin arm (2.11.0): host-software launch registration. */
       host_launcher?: string;
       host_root_hints?: string[];
@@ -75,6 +83,17 @@ export type ToolManifest = {
       uninstall_script?: string;
     };
   };
+  /** 脚本合集（2.30.0）：存在时为合集形态——前端按脚本切换参数表单，
+   * 执行参数 = {script: id, ...该脚本参数}。同步自仓库 tool.json。 */
+  scripts?: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    entry: string;
+    dangerous?: boolean;
+    parameters: ToolManifest['parameters'];
+    form?: ToolManifest['form'];
+  }>;
   result?: {
     renderer?: 'table' | 'map' | 'file' | 'link' | 'text' | 'markdown' | 'json';
     config?: { columns?: string[]; title?: string };

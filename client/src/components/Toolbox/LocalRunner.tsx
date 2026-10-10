@@ -91,6 +91,32 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
     [manifest, local],
   );
 
+  /* 脚本合集（2.30.0）：manifest.scripts 存在 → 参数区多一个脚本选择器，
+   * 表单按所选脚本切换（各自 parameters/form），执行参数 = {script, ...}。 */
+  const collectionScripts = manifest.scripts?.length ? manifest.scripts : undefined;
+  const [scriptId, setScriptId] = useState<string>(collectionScripts?.[0]?.id ?? '');
+  const selectedScript =
+    collectionScripts?.find((s) => s.id === scriptId) ?? collectionScripts?.[0];
+  const scriptManifest = useMemo<ToolManifest | undefined>(
+    () =>
+      selectedScript
+        ? {
+            ...effectiveManifest,
+            parameters: selectedScript.parameters,
+            ...(selectedScript.form ? { form: selectedScript.form as ToolManifest['form'] } : {}),
+            dangerous: Boolean(selectedScript.dangerous) || Boolean(effectiveManifest.dangerous),
+            ...(selectedScript.description ? { description: selectedScript.description } : {}),
+          }
+        : undefined,
+    [effectiveManifest, selectedScript],
+  );
+  /* 合集脚本定义变化（重新确认更新等）时，选中项失效则回落到首个脚本。 */
+  useEffect(() => {
+    if (collectionScripts?.length && !collectionScripts.some((s) => s.id === scriptId)) {
+      setScriptId(collectionScripts[0].id);
+    }
+  }, [collectionScripts, scriptId]);
+
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [ackDanger, setAckDanger] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -231,8 +257,14 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
   const start = async () => {
     setRunError(null);
     setShowLogs(false);
+    /* script 路由键以当前选中为准（历史恢复可能带回旧值，需剔除） */
+    const rest = Object.fromEntries(Object.entries(values).filter(([key]) => key !== 'script'));
+    const runArguments = collectionScripts ? { script: selectedScript?.id, ...rest } : values;
     try {
-      const started = await startRun.mutateAsync({ toolId: manifest.tool_id, arguments: values });
+      const started = await startRun.mutateAsync({
+        toolId: manifest.tool_id,
+        arguments: runArguments,
+      });
       if (started.run_id) {
         setRunId(started.run_id);
       }
@@ -246,7 +278,10 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
     return null;
   }
 
-  const dangerous = Boolean(effectiveManifest.dangerous);
+  /* 危险确认：合集取「所选脚本 ∪ 合集」的并集（切换脚本时跟随变化）。 */
+  const dangerous = Boolean(
+    scriptManifest ? scriptManifest.dangerous : effectiveManifest.dangerous,
+  );
   const confirmRequired = dangerous;
   const damaged = tool.damaged === true;
 
@@ -369,12 +404,41 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
         <h3 className="text-text-quaternary text-xs font-semibold uppercase tracking-wide">
           {localize('com_toolbox_params')}
         </h3>
-        <SchemaForm
-          manifest={effectiveManifest}
-          values={values}
-          onChange={setValues}
-          disabled={Boolean(runActive)}
-        />
+        {collectionScripts && selectedScript && scriptManifest ? (
+          <>
+            <select
+              className="config-input w-full"
+              value={selectedScript.id}
+              aria-label={localize('com_toolbox_script_label')}
+              onChange={(event) => {
+                setScriptId(event.target.value);
+                setValues({});
+              }}
+            >
+              {collectionScripts.map((script) => (
+                <option key={script.id} value={script.id}>
+                  {script.name}
+                </option>
+              ))}
+            </select>
+            {selectedScript.description && (
+              <p className="text-xs text-text-tertiary">{selectedScript.description}</p>
+            )}
+            <SchemaForm
+              manifest={scriptManifest}
+              values={values}
+              onChange={setValues}
+              disabled={Boolean(runActive)}
+            />
+          </>
+        ) : (
+          <SchemaForm
+            manifest={effectiveManifest}
+            values={values}
+            onChange={setValues}
+            disabled={Boolean(runActive)}
+          />
+        )}
       </section>
 
       {confirmRequired && (
@@ -471,6 +535,7 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
 
       <RunRecords
         toolId={manifest.tool_id}
+        collectionScripts={collectionScripts}
         onRestoreRun={setValues}
         renderResult={(result) => (
           <ResultView
@@ -493,10 +558,13 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
  * server tools (RunRecordsSection); Restore feeds the args back into the form. */
 function RunRecords({
   toolId,
+  collectionScripts,
   onRestoreRun,
   renderResult,
 }: {
   toolId: string;
+  /** 脚本合集（2.30.0）：历史行标注该次运行选中的脚本名。 */
+  collectionScripts?: NonNullable<ToolManifest['scripts']>;
   onRestoreRun: (params: Record<string, unknown>) => void;
   renderResult?: (result: unknown) => ReactNode;
 }) {
@@ -509,11 +577,20 @@ function RunRecords({
     status: run.status,
     created_at: run.created_at ?? '',
     duration_ms: localDurationMs(run),
+    script_label: scriptName(run, collectionScripts),
     params: run.arguments ?? null,
     result: run.result,
     onRestore: run.arguments ? onRestoreRun : undefined,
   }));
   return <RunRecordsSection rows={rows} localize={localize} renderResult={renderResult} />;
+}
+
+function scriptName(run: LocalRun, scripts?: NonNullable<ToolManifest['scripts']>): string | null {
+  const id = typeof run.arguments?.script === 'string' ? run.arguments.script : null;
+  if (!id) {
+    return null;
+  }
+  return scripts?.find((s) => s.id === id)?.name ?? id;
 }
 
 function localDurationMs(run: LocalRun): number | null {
