@@ -215,6 +215,10 @@ export type InstallRequestBody = {
   repo: string;
   /** Omitted = latest stable; explicit for the update path. */
   version?: string;
+  /** gitea_repo（2.30.0）：脚本仓库直连通道（archive/{sha}.zip，无 Release）。 */
+  channel?: 'release' | 'repo';
+  /** gitea_repo 跟踪分支（缺省 main）。 */
+  ref?: string;
   /** Gateway-registered supplemental fields (never browser-supplied URLs). */
   fallback?: {
     version?: string;

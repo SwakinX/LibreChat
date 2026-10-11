@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button, Spinner } from '@librechat/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CircleSlash, Loader2, Play, Square, Trash2, Wrench } from 'lucide-react';
+import type { InstallRequestBody, InstallJob, LocalRun } from './toolhost';
 import type { ExecuteResult, ToolManifest } from './types';
 import type { TranslationKeys } from '~/hooks/useLocalize';
-import type { InstallJob, LocalRun } from './toolhost';
 import type { MergedTool } from './toolStatus';
 import {
   useDeleteLocalTool,
@@ -184,10 +184,11 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
   ]);
 
   const distribution = manifest.execution?.distribution;
-  const installBody = () => {
+  const installBody = (): InstallRequestBody | null => {
     if (!distribution?.source) {
       return null;
     }
+    const isRepoChannel = distribution.source.type === 'gitea_repo';
     const fallback = {
       ...(distribution.version ? { version: distribution.version } : {}),
       ...(distribution.package_sha256 ? { package_sha256: distribution.package_sha256 } : {}),
@@ -198,6 +199,8 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
       tool_id: manifest.tool_id,
       owner: distribution.source.owner,
       repo: distribution.source.repo,
+      /* gitea_repo（2.30.0）：整仓 archive 通道——版本锚 = commit SHA */
+      ...(isRepoChannel ? { channel: 'repo', ref: distribution.source.ref || 'main' } : {}),
       ...(status === 'update_available' && latestVersion ? { version: latestVersion } : {}),
       ...(Object.keys(fallback).length > 0 ? { fallback } : {}),
     };
