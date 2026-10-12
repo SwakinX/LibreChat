@@ -360,23 +360,6 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
                 ? localize('com_toolbox_badge_installed', { version: local.installed_version })
                 : localize('com_toolbox_badge_installed_plain')}
             </span>
-            {/* 打开安装位置（toolhost-local 1.9.1）：路径取自 Toolhost 侧安装
-             * 记录，浏览器只见 409（目录缺失）/成功两种结果。 */}
-            <Button
-              variant="default"
-              className="flex items-center gap-1.5"
-              disabled={openDir.isPending}
-              onClick={() =>
-                openDir.mutateAsync(manifest.tool_id).catch((err: unknown) => {
-                  if (!(err as { status?: number } | null)?.status) {
-                    setRunError((err as Error)?.message ?? String(err));
-                  }
-                })
-              }
-            >
-              <FolderOpen className="size-3.5" aria-hidden="true" />
-              {localize('com_toolbox_local_open_dir')}
-            </Button>
             {confirmRemove ? (
               <span className="flex items-center gap-2 text-xs">
                 <span className="text-text-error">{localize('com_toolbox_remove_confirm')}</span>
@@ -404,6 +387,32 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
                 {localize('com_toolbox_remove')}
               </Button>
             )}
+          </div>
+        )}
+        {/* 安装目录行（与插件工具页一致，toolhost-local 1.9.1）：路径取自
+         * Toolhost 侧安装记录，打开失败（目录缺失）按 409 提示。 */}
+        {local?.install_dir && (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-text-secondary">
+            <span className="truncate" title={local.install_dir}>
+              {localize('com_toolbox_plugin_install_dir')}
+              {'：'}
+              {local.install_dir}
+            </span>
+            <Button
+              variant="secondary"
+              className="flex items-center gap-1.5"
+              disabled={openDir.isPending}
+              onClick={() =>
+                openDir.mutateAsync(manifest.tool_id).catch((err: unknown) => {
+                  if (!(err as { status?: number } | null)?.status) {
+                    setRunError((err as Error)?.message ?? String(err));
+                  }
+                })
+              }
+            >
+              <FolderOpen className="size-3.5" aria-hidden="true" />
+              {localize('com_toolbox_plugin_open_dir')}
+            </Button>
           </div>
         )}
         {damaged && (

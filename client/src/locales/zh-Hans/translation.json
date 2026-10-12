@@ -3009,7 +3009,6 @@
   "com_toolbox_badge_installed": "已安装 v{{version}}",
   "com_toolbox_badge_installed_plain": "已安装",
   "com_toolbox_badge_update_available": "可更新",
-  "com_toolbox_local_open_dir": "打开安装位置",
   "com_toolbox_local_manage": "本地安装",
   "com_toolbox_install": "安装",
   "com_toolbox_update_to": "升级到 v{{version}}",

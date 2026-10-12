@@ -30,6 +30,8 @@ export type LocalToolRecord = {
   name?: string | null;
   description?: string | null;
   installed_version?: string | null;
+  /** 安装目录（1.9.1 起随列表下发；插件工具的展示路径仍是 plugin.host_root）。 */
+  install_dir?: string | null;
   owner?: string | null;
   repo?: string | null;
   launcher?: string | null;

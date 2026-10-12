@@ -3009,7 +3009,6 @@
   "com_toolbox_badge_installed": "Installed v{{version}}",
   "com_toolbox_badge_installed_plain": "Installed",
   "com_toolbox_badge_update_available": "Update available",
-  "com_toolbox_local_open_dir": "Open install folder",
   "com_toolbox_local_manage": "Local install",
   "com_toolbox_install": "Install",
   "com_toolbox_update_to": "Update to v{{version}}",
