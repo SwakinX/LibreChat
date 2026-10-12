@@ -3165,5 +3165,6 @@
   "com_toolbox_map_import_picked": "Import selected",
   "com_toolbox_map_picked_count": "{n} selected",
   "com_toolbox_map_search": "Filter services, maps or datasets",
-  "com_toolbox_script_label": "Script"
+  "com_toolbox_script_label": "Script",
+  "com_toolbox_script_search": "Search scripts"
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Button, Spinner } from '@librechat/client';
 import { useQueryClient } from '@tanstack/react-query';
+import { Button, ControlCombobox, Spinner } from '@librechat/client';
 import { AlertTriangle, CircleSlash, Loader2, Play, Square, Trash2, Wrench } from 'lucide-react';
 import type { InstallRequestBody, InstallJob, LocalRun } from './toolhost';
 import type { ExecuteResult, ToolManifest } from './types';
@@ -409,21 +409,22 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
         </h3>
         {collectionScripts && selectedScript && scriptManifest ? (
           <>
-            <select
-              className="config-input w-full"
-              value={selectedScript.id}
-              aria-label={localize('com_toolbox_script_label')}
-              onChange={(event) => {
-                setScriptId(event.target.value);
+            <ControlCombobox
+              isCollapsed={false}
+              selectedValue={selectedScript.id}
+              displayValue={selectedScript.name}
+              selectPlaceholder={localize('com_toolbox_script_label')}
+              searchPlaceholder={localize('com_toolbox_script_search')}
+              setValue={(value: string) => {
+                setScriptId(value);
                 setValues({});
               }}
-            >
-              {collectionScripts.map((script) => (
-                <option key={script.id} value={script.id}>
-                  {script.name}
-                </option>
-              ))}
-            </select>
+              items={collectionScripts.map((script) => ({
+                label: script.name,
+                value: script.id,
+              }))}
+              ariaLabel={localize('com_toolbox_script_label')}
+            />
             {selectedScript.description && (
               <p className="text-xs text-text-tertiary">{selectedScript.description}</p>
             )}
