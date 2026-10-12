@@ -3166,5 +3166,10 @@
   "com_toolbox_map_picked_count": "{n} selected",
   "com_toolbox_map_search": "Filter services, maps or datasets",
   "com_toolbox_script_label": "Script",
-  "com_toolbox_script_search": "Search scripts"
+  "com_toolbox_script_search": "Search scripts",
+  "com_toolbox_selfupdate_button": "Update to v{version}",
+  "com_toolbox_selfupdate_updating": "Updating, the service will restart…",
+  "com_toolbox_selfupdate_done": "Updated to v{version}",
+  "com_toolbox_selfupdate_failed": "Update failed: {message}",
+  "com_toolbox_toolhost_version": "Running version"
 }

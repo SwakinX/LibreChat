@@ -251,6 +251,29 @@ export async function fetchInstallJob(jobId: string): Promise<InstallJob> {
   return parse(await toolhostFetch(`/v1/local/install-jobs/${encodeURIComponent(jobId)}`));
 }
 
+/** 运行版本报告（toolhost-local 1.9.0）：version + 是否打包模式。 */
+export type ToolhostVersionReport = { version: string; portable: boolean };
+
+export async function fetchToolhostVersion(): Promise<ToolhostVersionReport> {
+  return parse(await toolhostFetch('/v1/local/version', { timeoutMs: 5000 }));
+}
+
+/** 自更新（1.9.0）：下载暂存 toolhost-dist 指定版本并脱机换装重启。
+ * 长超时：zip 下载在请求内完成。 */
+export async function requestSelfUpdate(
+  version: string,
+  pairingCode: string,
+): Promise<{ accepted: boolean; version: string }> {
+  return parse(
+    await toolhostFetch('/v1/local/update', {
+      method: 'POST',
+      headers: jsonHeaders(pairingCode),
+      body: JSON.stringify({ version }),
+      timeoutMs: 180000,
+    }),
+  );
+}
+
 export async function deleteLocalTool(
   toolId: string,
   pairingCode: string,

@@ -17,10 +17,12 @@ import {
   fetchRun,
   fetchRunLogs,
   fetchRuns,
+  fetchToolhostVersion,
   openPluginHostDir,
   postInstall,
   postRun,
   postStopRun,
+  requestSelfUpdate,
   ToolhostError,
 } from './toolhost';
 import { pairingCodeAtom, pairingRejectedAtom } from './atoms';
@@ -266,5 +268,26 @@ export function useStopRun() {
     onError: guard,
     onSuccess: (_data, runId) =>
       void queryClient.invalidateQueries({ queryKey: ['toolhost', 'run', runId] }),
+  });
+}
+
+/** 运行版本报告（toolhost-local 1.9.0）：60s 轮询（仅在在线时）。 */
+export function useToolhostVersion(enabled: boolean) {
+  return useQuery({
+    queryKey: ['toolhost', 'version'],
+    queryFn: () => fetchToolhostVersion(),
+    enabled,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/** 自更新 mutation（1.9.0）：403 时守卫清配对码。 */
+export function useSelfUpdate() {
+  const guard = usePairingGuard();
+  const code = useAtomValue(pairingCodeAtom);
+  return useMutation({
+    mutationFn: (version: string) => requestSelfUpdate(version, code),
+    onError: guard,
   });
 }

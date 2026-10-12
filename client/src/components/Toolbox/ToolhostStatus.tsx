@@ -1,7 +1,14 @@
 import { useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
-import { Download, KeyRound, Loader2, MonitorCheck, MonitorX } from 'lucide-react';
-import { useAutoPairing, usePairingCode, useToolhostHealth } from './toolhostHooks';
+import { Button } from '@librechat/client';
+import { Download, KeyRound, Loader2, MonitorCheck, MonitorX, RefreshCw } from 'lucide-react';
+import {
+  useAutoPairing,
+  usePairingCode,
+  useSelfUpdate,
+  useToolhostHealth,
+  useToolhostVersion,
+} from './toolhostHooks';
 import { useToolhostReleaseInfo } from './api';
 import { pairingRejectedAtom } from './atoms';
 import StatusPopover from './StatusPopover';
@@ -64,7 +71,12 @@ export function ToolhostStatusCompact() {
       </div>
     );
   } else if (code) {
-    panelBody = <p className="text-text-tertiary">{localize('com_toolbox_local_run_hint')}</p>;
+    panelBody = (
+      <div className="flex flex-col gap-2">
+        <p className="text-text-tertiary">{localize('com_toolbox_local_run_hint')}</p>
+        <ToolhostSelfUpdate />
+      </div>
+    );
   } else {
     panelBody = (
       <form
@@ -135,6 +147,76 @@ export function ToolhostStatusCompact() {
 }
 
 export default ToolhostStatusCompact;
+
+/** 自更新面板（2.30.0/toolhost-local 1.9.0）：运行版本 + 检测到新版时显示
+ * 更新按钮。仅在已配对（online + code）时展示。更新过程：下载暂存 → 脱机
+ * 换装 → 计划任务重启（~10s）；期间按钮禁用并显示进度。 */
+function ToolhostSelfUpdate() {
+  const localize = useLocalize();
+  const health = useToolhostHealth();
+  const online = health.data === true;
+  const versionQuery = useToolhostVersion(online);
+  const release = useToolhostReleaseInfo(online);
+  const update = useSelfUpdate();
+  const current = versionQuery.data?.version ?? null;
+  const latest = release.data?.version ?? null;
+  const [phase, setPhase] = useState<'idle' | 'updating' | 'done' | 'failed'>('idle');
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [failMessage, setFailMessage] = useState<string | null>(null);
+
+  const isNewer = (() => {
+    if (!latest || !current || current === 'dev') return false;
+    const a = latest.split('.').map(Number);
+    const b = current.split('.').map(Number);
+    return (
+      a[0] > b[0] ||
+      (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && (a[2] ?? 0) > (b[2] ?? 0))))
+    );
+  })();
+
+  if (!current || current === 'dev') {
+    return null;
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-2 border-t border-border-light pt-2 text-xs text-text-tertiary">
+      <span>{`${localize('com_toolbox_toolhost_version')}: v${current}`}</span>
+      {phase === 'updating' && (
+        <span className="flex items-center gap-1 text-text-secondary">
+          <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+          {localize('com_toolbox_selfupdate_updating')}
+        </span>
+      )}
+      {phase === 'done' && (
+        <span className="text-emerald-600">
+          {localize('com_toolbox_selfupdate_done', { version: latest ?? '' })}
+        </span>
+      )}
+      {phase === 'failed' && (
+        <span className="text-text-error">
+          {localize('com_toolbox_selfupdate_failed', { message: failMessage ?? '' })}
+        </span>
+      )}
+      {isNewer && phase === 'idle' && latest != null && (
+        <Button
+          variant="default"
+          className="flex items-center gap-1"
+          disabled={update.isPending}
+          onClick={() => {
+            setPhase('updating');
+            update.mutate(latest, {
+              onSuccess: () => setPhase('done'),
+              onError: (_err, _vars, _ctx) => setPhase('failed'),
+            });
+          }}
+        >
+          <RefreshCw className="size-3" aria-hidden="true" />
+          {localize('com_toolbox_selfupdate_button', { version: latest })}
+        </Button>
+      )}
+    </div>
+  );
+}
 
 /** 离线安装引导卡（4b③）：发布仓版本 + 下载直链 + 三步安装说明。
  * 发布信息取自 /toolhost/release（公开分发仓 latest）；不可用时隐藏下载钮，

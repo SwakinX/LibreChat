@@ -19,6 +19,13 @@ jest.mock('../toolhostHooks', () => ({
   ...jest.requireActual('../toolhostHooks'),
   useToolhostHealth: () => ({ data: mockOnline }),
   useAutoPairing: () => mockAuto,
+  useToolhostVersion: () => ({ data: { version: '1.0.1', portable: true } }),
+  useSelfUpdate: () => ({
+    mutate: jest.fn(),
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+  }),
 }));
 
 jest.mock('../api', () => ({
