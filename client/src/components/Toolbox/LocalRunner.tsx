@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button, ControlCombobox, Spinner } from '@librechat/client';
-import { AlertTriangle, CircleSlash, Loader2, Play, Square, Trash2, Wrench } from 'lucide-react';
+import {
+  AlertTriangle,
+  CircleSlash,
+  FolderOpen,
+  Loader2,
+  Play,
+  Square,
+  Trash2,
+  Wrench,
+} from 'lucide-react';
 import type { InstallRequestBody, InstallJob, LocalRun } from './toolhost';
 import type { ExecuteResult, ToolManifest } from './types';
 import type { TranslationKeys } from '~/hooks/useLocalize';
@@ -11,6 +20,7 @@ import {
   useInstallJob,
   useInstallTool,
   useLocalRun,
+  useOpenToolDir,
   useRunLogs,
   useRunsForTool,
   useStartLocalRun,
@@ -127,6 +137,7 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
 
   const install = useInstallTool();
   const remove = useDeleteLocalTool();
+  const openDir = useOpenToolDir();
   const job = useInstallJob(jobId);
   const startRun = useStartLocalRun();
   const run = useLocalRun(runId);
@@ -247,6 +258,17 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
   const runActive = run.data?.status === 'preparing' || run.data?.status === 'running';
   const runTerminalFailed =
     run.data && TERMINAL_RUN_STATES.includes(run.data.status) ? run.data : null;
+
+  /* 历史还原（2.30.0 修订）：合集时按记录里的 script 切回对应脚本再填参，
+   * script 是分发键不进表单；危险确认勾选（ackDanger）独立于参数状态，
+   * 不随还原变动——还原≠重新确认。 */
+  const restoreRun = (params: Record<string, unknown>) => {
+    const script = typeof params.script === 'string' ? params.script : null;
+    if (script && collectionScripts?.some((s) => s.id === script)) {
+      setScriptId(script);
+    }
+    setValues(Object.fromEntries(Object.entries(params).filter(([key]) => key !== 'script')));
+  };
   const outcome: ExecuteResult | null =
     run.data?.status === 'succeeded' && run.data.result != null
       ? {
@@ -338,6 +360,23 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
                 ? localize('com_toolbox_badge_installed', { version: local.installed_version })
                 : localize('com_toolbox_badge_installed_plain')}
             </span>
+            {/* 打开安装位置（toolhost-local 1.9.1）：路径取自 Toolhost 侧安装
+             * 记录，浏览器只见 409（目录缺失）/成功两种结果。 */}
+            <Button
+              variant="default"
+              className="flex items-center gap-1.5"
+              disabled={openDir.isPending}
+              onClick={() =>
+                openDir.mutateAsync(manifest.tool_id).catch((err: unknown) => {
+                  if (!(err as { status?: number } | null)?.status) {
+                    setRunError((err as Error)?.message ?? String(err));
+                  }
+                })
+              }
+            >
+              <FolderOpen className="size-3.5" aria-hidden="true" />
+              {localize('com_toolbox_local_open_dir')}
+            </Button>
             {confirmRemove ? (
               <span className="flex items-center gap-2 text-xs">
                 <span className="text-text-error">{localize('com_toolbox_remove_confirm')}</span>
@@ -540,7 +579,7 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
       <RunRecords
         toolId={manifest.tool_id}
         collectionScripts={collectionScripts}
-        onRestoreRun={setValues}
+        onRestoreRun={restoreRun}
         renderResult={(result) => (
           <ResultView
             outcome={{

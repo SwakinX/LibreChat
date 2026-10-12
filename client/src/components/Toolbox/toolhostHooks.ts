@@ -18,7 +18,7 @@ import {
   fetchRunLogs,
   fetchRuns,
   fetchToolhostVersion,
-  openPluginHostDir,
+  openLocalToolDir,
   postInstall,
   postRun,
   postStopRun,
@@ -181,12 +181,13 @@ export function useDeleteLocalTool() {
   });
 }
 
-/** Open the plugin's recorded host directory in Explorer (1.8.0). */
-export function useOpenPluginHostDir() {
+/** Open the tool's recorded local directory in Explorer (1.8.0; 1.9.1 起
+ * 通用——插件开宿主目录，其余工具开安装目录）。 */
+export function useOpenToolDir() {
   const guard = usePairingGuard();
   const code = useAtomValue(pairingCodeAtom);
   return useMutation({
-    mutationFn: (toolId: string) => openPluginHostDir(toolId, code),
+    mutationFn: (toolId: string) => openLocalToolDir(toolId, code),
     onError: guard,
   });
 }

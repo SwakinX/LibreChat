@@ -12,6 +12,7 @@ import LocalRunner from '../LocalRunner';
 const mockHooks = {
   install: { isLoading: false, error: null as unknown, mutateAsync: jest.fn() },
   remove: { isLoading: false, error: null as unknown, mutate: jest.fn() },
+  openDir: { isPending: false, mutateAsync: jest.fn(async () => undefined) },
   job: { data: null as InstallJob | null },
   startRun: { isLoading: false, error: null as unknown, mutateAsync: jest.fn() },
   run: { data: null as LocalRun | null },
@@ -27,6 +28,7 @@ const mockInvalidate = jest.fn();
 jest.mock('../toolhostHooks', () => ({
   useInstallTool: () => mockHooks.install,
   useDeleteLocalTool: () => mockHooks.remove,
+  useOpenToolDir: () => mockHooks.openDir,
   useInstallJob: () => mockHooks.job,
   useStartLocalRun: () => mockHooks.startRun,
   useLocalRun: () => mockHooks.run,

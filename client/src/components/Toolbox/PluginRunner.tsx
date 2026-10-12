@@ -7,7 +7,7 @@ import {
   useDeleteLocalTool,
   useInstallJob,
   useInstallTool,
-  useOpenPluginHostDir,
+  useOpenToolDir,
   useStartLocalRun,
 } from './toolhostHooks';
 import { InstallJobPanel } from './LocalRunner';
@@ -33,7 +33,7 @@ export default function PluginRunner({ tool }: { tool: MergedTool }) {
   const install = useInstallTool();
   const remove = useDeleteLocalTool();
   const startRun = useStartLocalRun();
-  const openDir = useOpenPluginHostDir();
+  const openDir = useOpenToolDir();
   const reportRun = useReportToolRun();
   const [jobId, setJobId] = useState<string | null>(null);
   const job = useInstallJob(jobId);

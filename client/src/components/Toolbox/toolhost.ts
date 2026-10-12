@@ -184,10 +184,11 @@ export async function fetchHealth(): Promise<{ status: string }> {
   return parse(await toolhostFetch('/healthz', { timeoutMs: 2000 }));
 }
 
-/** Open the plugin's recorded host directory in Explorer (toolhost-local
- * 1.8.0). The path is the one recorded at install time on the Toolhost side —
- * never a client-supplied path. */
-export async function openPluginHostDir(toolId: string, pairingCode: string): Promise<void> {
+/** Open the tool's recorded local directory in Explorer (toolhost-local 1.8.0;
+ * since 1.9.1 every installed tool — plugins open the host root, the rest the
+ * install directory). The path is the one recorded at install time on the
+ * Toolhost side — never a client-supplied path. */
+export async function openLocalToolDir(toolId: string, pairingCode: string): Promise<void> {
   await parse(
     await toolhostFetch(`/v1/local/tools/${encodeURIComponent(toolId)}/open-host-dir`, {
       method: 'POST',
