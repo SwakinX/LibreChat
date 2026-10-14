@@ -492,6 +492,9 @@ const startServer = async () => {
       await runAsSystem(async () => {
         await initializeMCPs();
         await initializeOAuthReconnectManager();
+        /* TerraVox 危险工具动态审批钩子（ADR-0017 伴生）：进程级注册，
+           未开 HITL 时惰性。require 即注册。 */
+        require('./services/terravoxApprovalHook');
       });
       await checkMigrations();
 
