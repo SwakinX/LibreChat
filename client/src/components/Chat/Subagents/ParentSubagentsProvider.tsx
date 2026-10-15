@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useMemo } from 'react';
+import { Constants } from 'librechat-data-provider';
 import type { ParentSubagentIndex, ParentSubagentSummary } from 'librechat-data-provider';
 import { useParentSubagentsQuery } from '~/data-provider';
 
@@ -27,7 +28,16 @@ export function ParentSubagentsProvider({
   enabled: boolean;
   children: React.ReactNode;
 }) {
-  const { data, refetch } = useParentSubagentsQuery(conversationId, { enabled });
+  const { data, refetch } = useParentSubagentsQuery(conversationId, {
+    /* config.enabled 会整体替换 query 内置守卫——调用方只给「agents 端点+已选
+     * 智能体」条件，这里补上占位会话 id 守卫：新建对话（new/pending）不轮询，
+     * 否则 /api/convos/new/subagents 反复 404（refetchOnWindowFocus + 10s 间隔） */
+    enabled:
+      enabled &&
+      conversationId !== '' &&
+      conversationId !== Constants.NEW_CONVO &&
+      conversationId !== Constants.PENDING_CONVO,
+  });
   const refresh = useCallback(async () => {
     const result = await refetch();
     return result.data;
