@@ -530,7 +530,17 @@ const refreshController = async (req, res) => {
         logger.warn('[refreshController] OpenID session missing; sign-in required');
         return res.status(401).send({ code: 'OPENID_SESSION_MISSING' });
       }
-      logger.error('[refreshController] OpenID token refresh error', error);
+      logger.error(
+        {
+          message: '[refreshController] OpenID token refresh error',
+          error_message: error?.message,
+          /** openid-client RPError：IdP 拒绝体（invalid_grant 等）在这里 */
+          error_code: error?.error ?? error?.response?.error,
+          error_description:
+            error?.error_description ?? error?.response?.body ?? error?.response?.data,
+        },
+        error,
+      );
 
       /**
        * Detect and recover from stale refresh-token cookie after SSE-triggered rotation.
