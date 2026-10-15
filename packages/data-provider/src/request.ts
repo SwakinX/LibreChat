@@ -227,9 +227,27 @@ const startAuthRecovery = (retryRefresh?: boolean) => {
   return state.refreshPromise;
 };
 
+/** SSO 静默重入冷却：令牌失联（如浏览器未接住轮换后的 refreshToken）时优先
+ *  跳 /oauth/openid——IdP 会话存续期内免密自动通过并回到应用；2 分钟内只允许
+ *  一次，再失败落回 /login 手动登录。 */
+const SSO_REENTRY_KEY = 'terravox_sso_reentry_at';
+const SSO_REENTRY_COOLDOWN_MS = 2 * 60 * 1000;
+
 const redirectToLoginOnce = () => {
   if (isAuthRedirectInProgress()) {
     return;
+  }
+
+  try {
+    const last = Number(window.sessionStorage.getItem(SSO_REENTRY_KEY) ?? 0);
+    if (Date.now() - last > SSO_REENTRY_COOLDOWN_MS) {
+      window.sessionStorage.setItem(SSO_REENTRY_KEY, String(Date.now()));
+      setAuthRedirectStartedAt();
+      window.location.assign(`${endpoints.apiBaseUrl()}/oauth/openid`);
+      return;
+    }
+  } catch {
+    /* sessionStorage 不可用（隐私模式等）→ 走 /login 兜底 */
   }
 
   const href = endpoints.apiBaseUrl() + endpoints.buildLoginRedirectUrl();
