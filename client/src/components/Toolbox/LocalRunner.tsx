@@ -211,9 +211,12 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
       owner: distribution.source.owner,
       repo: distribution.source.repo,
       /* gitea_repo（2.30.0）：整仓 archive 通道——版本锚 = commit SHA。
-       * ref 挂 distribution 层（不在 source 内，2.30.0 契约修正）——
-       * 此前误读 source.ref 致非 main 分支的仓库安装必败（mineru-batch 实测）。 */
-      ...(isRepoChannel ? { channel: 'repo', ref: distribution.ref || 'main' } : {}),
+       * ref 挂 distribution 层（2.32.0 修正：此前误读 source.ref 致非 main
+       * 分支仓库安装必败）。2.32.0 治理对齐：恒钉 manifest.version（批准
+       * SHA）——分支前进不影响用户安装，更新须经后台确认后由版本下发。 */
+      ...(isRepoChannel
+        ? { channel: 'repo', ref: distribution.ref || 'main', version: manifest.version }
+        : {}),
       ...(status === 'update_available' && latestVersion ? { version: latestVersion } : {}),
       ...(Object.keys(fallback).length > 0 ? { fallback } : {}),
     };

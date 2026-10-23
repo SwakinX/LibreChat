@@ -144,6 +144,36 @@ describe('LocalRunner', () => {
     expect(screen.getByText(/com_toolbox_stage_downloading/)).toBeInTheDocument();
   });
 
+  it('repo channel: install body pins channel/ref and the approved SHA version', async () => {
+    mockHooks.install.mutateAsync.mockResolvedValue({ job_id: 'j1' });
+    mockHooks.job.data = job('downloading', {});
+    const repoTool = tool();
+    repoTool.manifest = {
+      ...repoTool.manifest,
+      version: '59f352f7aec6',
+      execution: {
+        kind: 'desktop',
+        distribution: {
+          source: { type: 'gitea_repo', owner: 'bigdata', repo: 'mineru-batch' },
+          ref: 'master',
+        },
+      },
+    };
+    render(<LocalRunner tool={repoTool} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /com_toolbox_install/ }));
+    await waitFor(() =>
+      expect(mockHooks.install.mutateAsync).toHaveBeenCalledWith({
+        tool_id: 'wangjianbo.toolsdemo',
+        owner: 'bigdata',
+        repo: 'mineru-batch',
+        channel: 'repo',
+        ref: 'master',
+        version: '59f352f7aec6',
+      }),
+    );
+  });
+
   it('failed job: alert with the mapped error code and raw message', async () => {
     mockHooks.install.mutateAsync.mockResolvedValue({ job_id: 'j1' });
     mockHooks.job.data = job('failed', {

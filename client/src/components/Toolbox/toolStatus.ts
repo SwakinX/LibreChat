@@ -62,6 +62,14 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+/** repo 通道（2.30.0）的版本锚是 commit SHA——无序，不可跑 semver 比较
+ * （"59f352…" vs "7b650d…" 会得出任意方向的假更新）。 */
+const SHA_VERSION_RE = /^[0-9a-f]{7,40}$/i;
+
+function isShaVersion(version: string | null | undefined): boolean {
+  return !!version && SHA_VERSION_RE.test(version) && !/^\d+\.\d+\.\d+$/.test(version);
+}
+
 export function mergeCatalogWithLocal(
   catalog: ToolManifest[],
   localTools: LocalToolRecord[],
@@ -78,9 +86,13 @@ export function mergeCatalogWithLocal(
       return { manifest, status: 'not_installed' };
     }
     /* Catalog manifest version is the admin-approved latest (2.8.0 governance):
-     * repo releases ahead of it stay hidden until an admin confirms them. */
+     * repo releases ahead of it stay hidden until an admin confirms them.
+     * SHA 锚（repo 通道）无序——仅判等（不同 = 与批准版本不一致，跟随确认更新）。 */
     const latestVersion = manifest.version;
-    const outdated = compareVersions(latestVersion, local.installed_version ?? '') > 0;
+    const outdated =
+      isShaVersion(latestVersion) || isShaVersion(local.installed_version)
+        ? latestVersion !== (local.installed_version ?? '')
+        : compareVersions(latestVersion, local.installed_version ?? '') > 0;
     return {
       manifest,
       local,
