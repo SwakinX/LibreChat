@@ -210,8 +210,10 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
       tool_id: manifest.tool_id,
       owner: distribution.source.owner,
       repo: distribution.source.repo,
-      /* gitea_repo（2.30.0）：整仓 archive 通道——版本锚 = commit SHA */
-      ...(isRepoChannel ? { channel: 'repo', ref: distribution.source.ref || 'main' } : {}),
+      /* gitea_repo（2.30.0）：整仓 archive 通道——版本锚 = commit SHA。
+       * ref 挂 distribution 层（不在 source 内，2.30.0 契约修正）——
+       * 此前误读 source.ref 致非 main 分支的仓库安装必败（mineru-batch 实测）。 */
+      ...(isRepoChannel ? { channel: 'repo', ref: distribution.ref || 'main' } : {}),
       ...(status === 'update_available' && latestVersion ? { version: latestVersion } : {}),
       ...(Object.keys(fallback).length > 0 ? { fallback } : {}),
     };
@@ -243,10 +245,13 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
       return;
     }
     try {
+      const isRepoChannel = source.type === 'gitea_repo';
       const started = await install.mutateAsync({
         tool_id: manifest.tool_id,
         owner: source.owner,
         repo: source.repo,
+        /* repo 通道修复也须带 channel/ref（同 installBody 的分发定位） */
+        ...(isRepoChannel ? { channel: 'repo' as const, ref: distribution?.ref || 'main' } : {}),
         ...(local?.installed_version ? { version: local.installed_version } : {}),
       });
       setJobId(started.job_id);

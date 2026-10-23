@@ -66,9 +66,9 @@ export type ToolManifest = {
         type: 'gitea_release' | 'gitea_repo';
         owner: string;
         repo: string;
-        /** gitea_repo（2.30.0）：跟踪分支，缺省 main。 */
-        ref?: string;
       };
+      /** gitea_repo（2.30.0）：跟踪分支，缺省 main（挂 distribution 层，不在 source 内）。 */
+      ref?: string;
       /** Supplemental fields (tool.json fallback), trusted because admin-registered. */
       version?: string;
       package_sha256?: string;
