@@ -341,26 +341,7 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
             </span>
           </div>
         )}
-        {status === 'update_available' && (
-          <div className="flex items-center gap-3">
-            <Button
-              variant="default"
-              className="flex items-center gap-1.5"
-              disabled={install.isLoading}
-              onClick={startInstall}
-            >
-              <Play className="size-3.5" aria-hidden="true" />
-              {latestVersion
-                ? localize('com_toolbox_update_to', { version: latestVersion })
-                : localize('com_toolbox_update_latest')}
-            </Button>
-            <span className="text-xs text-text-tertiary">
-              {local?.installed_version &&
-                localize('com_toolbox_badge_installed', { version: local.installed_version })}
-            </span>
-          </div>
-        )}
-        {status === 'installed' && (
+        {(status === 'update_available' || status === 'installed') && (
           <div className="flex flex-wrap items-center gap-3">
             <span className="flex items-center gap-1.5 text-xs text-text-secondary">
               <CircleSlash className="size-3.5 text-emerald-500" aria-hidden="true" />
@@ -368,6 +349,20 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
                 ? localize('com_toolbox_badge_installed', { version: local.installed_version })
                 : localize('com_toolbox_badge_installed_plain')}
             </span>
+            {status === 'update_available' && (
+              <Button
+                variant="default"
+                className="flex items-center gap-1.5"
+                disabled={install.isLoading}
+                onClick={startInstall}
+              >
+                <Play className="size-3.5" aria-hidden="true" />
+                {latestVersion
+                  ? localize('com_toolbox_update_to', { version: latestVersion })
+                  : localize('com_toolbox_update_latest')}
+              </Button>
+            )}
+            {/* 卸载在「已安装/可更新」两态都可用（2.32.0：可更新态此前无卸载入口） */}
             {confirmRemove ? (
               <span className="flex items-center gap-2 text-xs">
                 <span className="text-text-error">{localize('com_toolbox_remove_confirm')}</span>
