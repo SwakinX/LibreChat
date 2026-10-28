@@ -3171,5 +3171,7 @@
   "com_toolbox_selfupdate_updating": "Updating, the service will restart…",
   "com_toolbox_selfupdate_done": "Updated to v{version}",
   "com_toolbox_selfupdate_failed": "Update failed: {message}",
-  "com_toolbox_toolhost_version": "Running version"
+  "com_toolbox_toolhost_version": "Running version",
+  "com_toolbox_stage_deps": "Syncing Python dependencies",
+  "com_toolbox_err_deps_failed": "Dependency sync failed"
 }

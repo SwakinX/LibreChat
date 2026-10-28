@@ -39,6 +39,7 @@ const STAGE_KEYS: Record<string, TranslationKeys> = {
   downloading: 'com_toolbox_stage_downloading',
   verifying: 'com_toolbox_stage_verifying',
   staging: 'com_toolbox_stage_staging',
+  deps: 'com_toolbox_stage_deps',
   installing: 'com_toolbox_stage_installing',
 };
 
@@ -55,6 +56,7 @@ const ERROR_KEYS: Record<string, TranslationKeys> = {
   host_root_invalid: 'com_toolbox_err_host_root_invalid',
   install_script_failed: 'com_toolbox_err_install_script_failed',
   uninstall_script_failed: 'com_toolbox_err_uninstall_script_failed',
+  deps_failed: 'com_toolbox_err_deps_failed',
   internal: 'com_toolbox_err_internal',
 };
 

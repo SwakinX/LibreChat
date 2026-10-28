@@ -3178,5 +3178,7 @@
   "com_toolbox_selfupdate_updating": "正在更新，服务即将重启…",
   "com_toolbox_selfupdate_done": "已更新到 v{version}",
   "com_toolbox_selfupdate_failed": "更新失败：{message}",
-  "com_toolbox_toolhost_version": "运行版本"
+  "com_toolbox_toolhost_version": "运行版本",
+  "com_toolbox_stage_deps": "依赖同步中",
+  "com_toolbox_err_deps_failed": "依赖同步失败"
 }

@@ -192,7 +192,7 @@ export function useOpenToolDir() {
   });
 }
 
-const INSTALL_JOB_ACTIVE = ['downloading', 'verifying', 'staging', 'installing'];
+const INSTALL_JOB_ACTIVE = ['downloading', 'verifying', 'staging', 'deps', 'installing'];
 
 /** Poll the install job while active; on a terminal state refresh the local
  * tools list so badges flip without waiting for the 30s interval. */

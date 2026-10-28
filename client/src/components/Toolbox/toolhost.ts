@@ -54,7 +54,13 @@ export type LocalToolRecord = {
   installed_at?: string | null;
 };
 
-export type InstallJobState = 'downloading' | 'verifying' | 'staging' | 'installed' | 'failed';
+export type InstallJobState =
+  | 'downloading'
+  | 'verifying'
+  | 'staging'
+  | 'deps'
+  | 'installed'
+  | 'failed';
 
 export type InstallJobErrorCode =
   | 'resolve_failed'
@@ -65,6 +71,7 @@ export type InstallJobErrorCode =
   | 'archive_invalid'
   | 'launcher_missing'
   | 'version_conflict'
+  | 'deps_failed'
   | 'internal';
 
 export type InstallJob = {
