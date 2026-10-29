@@ -26,29 +26,29 @@ const manifest = {
   parameters: {
     type: 'object' as const,
     properties: {
-      tags: { type: 'array', items: { type: 'string' } },
-      export_date: { type: 'string' },
-      run_at: { type: 'string' },
-      source_file: { type: 'string' },
-      out_dir: { type: 'string' },
-      region: { type: 'string' },
-      format: { type: 'string' },
-    },
-  },
-  form: {
-    order: ['tags', 'export_date', 'run_at', 'source_file', 'out_dir', 'region', 'format'],
-    fields: {
-      tags: { widget: 'multiselect' as const, label: '输出格式', choices: ['gdb', 'shp', 'udbx'] },
-      export_date: { widget: 'date' as const, label: '导出日期' },
-      run_at: { widget: 'datetime' as const, label: '执行时间' },
-      source_file: { widget: 'file' as const, label: '输入文件' },
-      out_dir: { widget: 'directory' as const, label: '输出目录' },
+      tags: {
+        type: 'array',
+        items: { type: 'string' },
+        enum: ['gdb', 'shp', 'udbx'],
+        title: '输出格式',
+        widget: 'multiselect' as const,
+      },
+      export_date: { type: 'string', title: '导出日期', widget: 'date' as const },
+      run_at: { type: 'string', title: '执行时间', widget: 'datetime' as const },
+      source_file: { type: 'string', title: '输入文件', widget: 'file' as const },
+      out_dir: { type: 'string', title: '输出目录', widget: 'directory' as const },
       region: {
+        type: 'string',
+        title: '大区',
         widget: 'select' as const,
-        label: '大区',
         choices_from: { tool: 'demo.options', value_field: 'id', label_field: 'name' },
       },
-      format: { widget: 'select' as const, label: '静态选择', choices: ['a', 'b'] },
+      format: {
+        type: 'string',
+        title: '静态选择',
+        enum: ['a', 'b'],
+        widget: 'select' as const,
+      },
     },
   },
 };
@@ -166,19 +166,20 @@ describe('SchemaForm v1 widgets', () => {
     expect(onChange).toHaveBeenLastCalledWith({ format: 'b' });
   });
 
-  it('renders form-only upload fields (no properties entry) without crashing', () => {
-    /* ParamBuilder 生成的上传参数只写 form.fields 不进 properties（contracts
-     * 2.15.0）——此前 prop.enum 直接 TypeError 整页崩（2026-10-05 实测）。 */
-    const uploadOnly = {
+  it('renders upload fields declared in properties without crashing', () => {
+    /* 3.0.0：upload 字段与普通字段一样声明在 properties（widget: upload），
+     * multipart 通道语义不变。 */
+    const uploadManifest = {
       ...manifest,
-      parameters: { type: 'object' as const, properties: {} },
-      form: {
-        order: ['attachment'],
-        fields: { attachment: { widget: 'upload' as const, label: '附件' } },
+      parameters: {
+        type: 'object' as const,
+        properties: {
+          attachment: { type: 'string', title: '附件', widget: 'upload' as const },
+        },
       },
     };
     const onChange = jest.fn();
-    render(<SchemaForm manifest={uploadOnly} values={{}} onChange={onChange} />);
+    render(<SchemaForm manifest={uploadManifest} values={{}} onChange={onChange} />);
     expect(screen.getByText('附件')).toBeInTheDocument();
     expect(screen.getByText('com_toolbox_widget_pick_file')).toBeInTheDocument();
   });

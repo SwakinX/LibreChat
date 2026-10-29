@@ -96,7 +96,6 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
     () => ({
       ...manifest,
       parameters: manifest.parameters ?? local?.parameters ?? undefined,
-      form: (manifest.form as ToolManifest['form']) ?? (local?.form as ToolManifest['form']),
       result:
         (manifest.result as ToolManifest['result']) ?? (local?.result as ToolManifest['result']),
     }),
@@ -104,7 +103,7 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
   );
 
   /* 脚本合集（2.30.0）：manifest.scripts 存在 → 参数区多一个脚本选择器，
-   * 表单按所选脚本切换（各自 parameters/form），执行参数 = {script, ...}。 */
+   * 表单按所选脚本切换（各自 parameters），执行参数 = {script, ...}。 */
   const collectionScripts = manifest.scripts?.length ? manifest.scripts : undefined;
   const [scriptId, setScriptId] = useState<string>(collectionScripts?.[0]?.id ?? '');
   const selectedScript =
@@ -115,7 +114,6 @@ export default function LocalRunner({ tool }: { tool: MergedTool }) {
         ? {
             ...effectiveManifest,
             parameters: selectedScript.parameters,
-            ...(selectedScript.form ? { form: selectedScript.form as ToolManifest['form'] } : {}),
             dangerous: Boolean(selectedScript.dangerous) || Boolean(effectiveManifest.dangerous),
             ...(selectedScript.description ? { description: selectedScript.description } : {}),
           }

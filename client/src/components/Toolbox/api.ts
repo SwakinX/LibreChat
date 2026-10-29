@@ -197,7 +197,7 @@ async function fetchChoices(
     .filter((option) => option.value !== '');
 }
 
-/** Dynamic select options from another tool (manifest form.fields.*.choices_from).
+/** Dynamic select options from another tool (inline choices_from annotation).
  * Source must be callable with empty params and exposed to the ui front. */
 export const useChoicesFrom = (
   source: { tool: string; value_field?: string; label_field?: string } | undefined,
@@ -420,7 +420,6 @@ export type LocalPending = {
   dangerous: boolean;
   params: Record<string, unknown>;
   parameters?: ToolManifest['parameters'];
-  form?: ToolManifest['form'];
   created_at: string;
   expires_at: string;
 };

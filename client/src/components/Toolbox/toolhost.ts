@@ -46,10 +46,6 @@ export type LocalToolRecord = {
     properties?: Record<string, Record<string, unknown>>;
     required?: string[];
   } | null;
-  form?: {
-    order?: string[];
-    fields?: Record<string, unknown>;
-  } | null;
   result?: { renderer?: string; config?: Record<string, unknown> } | null;
   installed_at?: string | null;
 };

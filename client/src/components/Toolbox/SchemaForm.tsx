@@ -36,26 +36,33 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
   const localize = useLocalize();
   const fields = useMemo<FieldDef[]>(() => {
     const props = manifest.parameters?.properties ?? {};
-    const hints = manifest.form?.fields ?? {};
-    const order = manifest.form?.order;
     const required = new Set(manifest.parameters?.required ?? []);
-    const names = [...(order ?? []), ...Object.keys(props).filter((n) => !order?.includes(n))];
+    /* 3.0.0 form 合并：UI 注解内联在每个属性上，properties 书写顺序即渲染顺序 */
+    const names = Object.keys(props);
     return names
-      .filter(
-        (name) =>
-          /* upload 字段是 multipart 专用（contracts 2.15.0），刻意不在 parameters.properties 里 */
-          (props[name] || hints[name]?.widget === 'upload') && hints[name]?.widget !== 'hidden',
-      )
+      .filter((name) => {
+        const prop = props[name] as Record<string, unknown>;
+        return prop.widget !== 'hidden';
+      })
       .map((name) => {
-        /* upload-only 字段刻意不在 properties 里（见上方过滤注释）——prop 兜底
-         * 空对象，否则 prop.enum 直接 TypeError（ParamBuilder 生成的上传参数
-         * 即此形态，打开工具整页崩，实测）。 */
         const prop = (props[name] ?? {}) as Record<string, unknown>;
-        const enumValues = Array.isArray(prop.enum) ? (prop.enum as string[]) : undefined;
+        /* 静态选项：标量属性读 enum；数组属性读 items.enum（3.0.0） */
+        let enumValues = Array.isArray(prop.enum) ? (prop.enum as string[]) : undefined;
+        if (
+          enumValues === undefined &&
+          prop.type === 'array' &&
+          prop.items &&
+          typeof prop.items === 'object'
+        ) {
+          const items = prop.items as Record<string, unknown>;
+          if (Array.isArray(items.enum)) {
+            enumValues = items.enum as string[];
+          }
+        }
         return {
           name,
-          hint: hints[name] ?? {},
-          required: required.has(name) || hints[name]?.widget === 'upload',
+          hint: prop as unknown as FieldHint,
+          required: required.has(name) || (prop as { widget?: string }).widget === 'upload',
           type: typeof prop.type === 'string' ? prop.type : 'string',
           enumValues,
           default: prop.default,
@@ -126,26 +133,9 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
           value={String(value ?? '')}
           disabled={disabled}
           commonCls={commonCls}
-          ariaLabel={field.hint.label || field.name}
+          ariaLabel={field.hint.title || field.name}
           onChange={(next) => set(field.name, next)}
         />
-      );
-    }
-    if (field.hint.choices) {
-      return (
-        <select
-          className={commonCls}
-          disabled={disabled}
-          value={String(value ?? '')}
-          onChange={(e) => set(field.name, e.target.value)}
-        >
-          <option value="">—</option>
-          {field.hint.choices.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
       );
     }
     if (field.type === 'boolean') {
@@ -264,7 +254,7 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
           }
           browseLabel={localize('com_toolbox_widget_browse')}
           value={String(value ?? '')}
-          dialogTitle={field.hint.label || field.name}
+          dialogTitle={field.hint.title || field.name}
           onChange={(next) => set(field.name, next)}
         />
       );
@@ -284,7 +274,7 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
   return (
     <div className="flex flex-col gap-4">
       {fields.map((field) => {
-        const label = field.hint.label ?? field.name;
+        const label = field.hint.title ?? field.name;
         const value = values[field.name] ?? field.default ?? '';
         return (
           <label key={field.name} className="flex flex-col gap-1.5">
@@ -319,11 +309,8 @@ export default function SchemaForm({ manifest, values, onChange, disabled }: Sch
   );
 }
 
-/** Static options: hint.choices wins, schema enum is the fallback. */
+/** Static options come from the schema enum (3.0.0: hint.choices removed). */
 function staticChoices(field: FieldDef): string[] | undefined {
-  if (field.hint.choices?.length) {
-    return field.hint.choices;
-  }
   return field.enumValues;
 }
 
@@ -376,7 +363,7 @@ function MultiSelectControl({
         value={value.join(', ')}
         placeholder={field.hint.placeholder}
         disabled={disabled}
-        ariaLabel={field.hint.label || field.name}
+        ariaLabel={field.hint.title || field.name}
         hint={localize('com_toolbox_choices_failed')}
         onChange={(next) =>
           onSetList(

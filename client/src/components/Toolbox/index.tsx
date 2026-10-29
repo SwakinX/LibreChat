@@ -163,8 +163,8 @@ function ToolRunner({ manifest }: { manifest: ToolManifest }) {
     setOutcome(null);
     try {
       /* upload 控件工具走 multipart 通道（文件内容不进 JSON params）。 */
-      const uploadNames = Object.entries(manifest.form?.fields ?? {})
-        .filter(([, hint]) => hint?.widget === 'upload')
+      const uploadNames = Object.entries(manifest.parameters?.properties ?? {})
+        .filter(([, spec]) => (spec as Record<string, unknown>)?.widget === 'upload')
         .map(([name]) => name);
       const result = uploadNames.length
         ? await executeUpload(manifest.tool_id, {

@@ -355,21 +355,27 @@ describe('LocalRunner', () => {
     expect(screen.getByText('com_toolbox_runs_empty')).toBeInTheDocument();
   });
 
-  it('installed: manifest (gateway) is the runtime authority for params/form — local tool.json is only the offline fallback', () => {
+  it('installed: manifest (gateway) is the runtime authority for params — local tool.json is only the offline fallback', () => {
     const merged = tool({
       status: 'installed',
       manifest: {
         ...tool().manifest,
-        form: {
-          order: ['text'],
-          fields: { text: { widget: 'textarea', placeholder: 'manifest placeholder' } },
+        parameters: {
+          type: 'object',
+          properties: {
+            text: { type: 'string', widget: 'textarea', placeholder: 'manifest placeholder' },
+          },
+          required: ['text'],
         },
       },
       local: {
         ...local('1.0.0'),
-        form: {
-          order: ['text'],
-          fields: { text: { widget: 'textarea', placeholder: 'local placeholder' } },
+        parameters: {
+          type: 'object',
+          properties: {
+            text: { type: 'string', widget: 'textarea', placeholder: 'local placeholder' },
+          },
+          required: ['text'],
         },
       } as MergedTool['local'],
     });
@@ -379,9 +385,9 @@ describe('LocalRunner', () => {
     expect(screen.queryByPlaceholderText('local placeholder')).not.toBeInTheDocument();
   });
 
-  it('installed with missing manifest form: local tool.json supplies the form (offline fallback)', () => {
+  it('installed with missing manifest parameters: local tool.json supplies them (offline fallback)', () => {
     const bare = tool({ status: 'installed', local: local('1.0.0') });
-    const manifest = { ...bare.manifest, form: undefined } as MergedTool['manifest'];
+    const manifest = { ...bare.manifest, parameters: undefined } as MergedTool['manifest'];
     render(
       <LocalRunner
         tool={{
@@ -389,9 +395,12 @@ describe('LocalRunner', () => {
           manifest,
           local: {
             ...local('1.0.0'),
-            form: {
-              order: ['text'],
-              fields: { text: { widget: 'textarea', placeholder: 'local placeholder' } },
+            parameters: {
+              type: 'object',
+              properties: {
+                text: { type: 'string', widget: 'textarea', placeholder: 'local placeholder' },
+              },
+              required: ['text'],
             },
           } as MergedTool['local'],
         }}

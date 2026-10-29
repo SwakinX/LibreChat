@@ -1,7 +1,10 @@
 /** Tool Manifest v1 (terravox-contracts) — the subset the toolbox UI consumes. */
 
+/** 3.0.0: form merged into parameters — UI annotations live inline on each
+ * property (alongside the standard JSON-Schema keywords). */
 export type FieldHint = {
-  label?: string;
+  /** Form label (JSON-Schema standard annotation; model also sees it). */
+  title?: string;
   help?: string;
   placeholder?: string;
   widget?:
@@ -19,11 +22,13 @@ export type FieldHint = {
     /** 2.15.0: browser file bytes go through the multipart execute channel
      * (distinct from 'file' = a local path string). */
     | 'upload';
-  choices?: string[];
   /** Extension filter for the file widget (2.13.0): leading-dot entries
    * like ['.gdb', '.shp'] — the native dialog shows matching files only. */
   accept?: string[];
   choices_from?: { tool: string; value_field?: string; label_field?: string };
+  /** 2.31.0: admin-only field — hidden from non-admin forms, stripped from
+   * MCP inputSchema and execute params gateway-side. */
+  admin_only?: boolean;
 };
 
 export type ToolManifest = {
@@ -49,10 +54,6 @@ export type ToolManifest = {
     type: 'object';
     properties?: Record<string, Record<string, unknown>>;
     required?: string[];
-  };
-  form?: {
-    order?: string[];
-    fields?: Record<string, FieldHint>;
   };
   execution?: {
     kind: string;
@@ -92,7 +93,6 @@ export type ToolManifest = {
     entry: string;
     dangerous?: boolean;
     parameters: ToolManifest['parameters'];
-    form?: ToolManifest['form'];
   }>;
   result?: {
     renderer?: 'table' | 'map' | 'file' | 'link' | 'text' | 'markdown' | 'json';

@@ -124,7 +124,6 @@ export function synthesizeManifest(record: LocalToolRecord): ToolManifest {
     description: record.description ?? '',
     dangerous: record.dangerous ?? false,
     parameters: record.parameters ?? undefined,
-    form: (record.form as ToolManifest['form']) ?? undefined,
     result: (record.result as ToolManifest['result']) ?? undefined,
     execution: { kind: 'desktop' },
   };
