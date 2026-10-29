@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { Button } from '@librechat/client';
-import { Download, KeyRound, Loader2, MonitorCheck, MonitorX, RefreshCw } from 'lucide-react';
+import { Download, KeyRound, Loader2, MonitorCheck, MonitorX, Play, RefreshCw } from 'lucide-react';
 import {
   useAutoPairing,
   usePairingCode,
@@ -236,10 +236,21 @@ function ToolhostInstallGuide() {
         <li>{localize('com_toolbox_toolhost_install_step2')}</li>
         <li>{localize('com_toolbox_toolhost_install_step3')}</li>
       </ol>
+      {/* terravox:// 一键唤起：安装器版已注册 per-user 协议处理器，点击经
+          wscript→schtasks 拉起本地服务（已在跑则空操作），5s 轮询自动转绿；
+          浏览器首次点击会弹一次外部协议确认。绿色 zip 未注册协议时点了
+          无效，不碍事。 */}
+      <a
+        href="terravox://start"
+        className="mt-1 flex w-fit items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
+      >
+        <Play className="size-3" aria-hidden="true" />
+        {localize('com_toolbox_toolhost_launch')}
+      </a>
       {release?.download_url && (
         <a
           href={release.download_url}
-          className="mt-1 flex w-fit items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
+          className="flex w-fit items-center gap-1.5 rounded-md border border-border-medium px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
         >
           <Download className="size-3" aria-hidden="true" />
           {localize('com_toolbox_toolhost_download')}

@@ -76,6 +76,11 @@ describe('ToolhostStatusCompact (sidebar icon strip)', () => {
     fireEvent.click(button);
     expect(button).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('com_toolbox_toolhost_offline_hint')).toBeInTheDocument();
+    /* terravox:// 一键唤起链接（安装器版协议处理器） */
+    expect(screen.getByRole('link', { name: 'com_toolbox_toolhost_launch' })).toHaveAttribute(
+      'href',
+      'terravox://start',
+    );
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(button).toHaveAttribute('aria-expanded', 'false');
